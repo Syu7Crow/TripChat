@@ -1,3 +1,5 @@
+export type TravelMode = "walking" | "driving" | "transit";
+
 export type TimelineItem = {
   id: string;
   trip_id: string;
@@ -7,6 +9,9 @@ export type TimelineItem = {
   end_time: string | null;
   title: string;
   note: string | null;
+  lat: number | null;
+  lng: number | null;
+  travel_mode: TravelMode | null;
 };
 
 export type TripInfo = {
