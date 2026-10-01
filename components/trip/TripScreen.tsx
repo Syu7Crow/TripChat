@@ -284,24 +284,39 @@ export default function TripScreen({ tripId }: { tripId: string }) {
         </div>
       </section>
 
-      <section className="mx-auto max-w-3xl px-6 py-8 md:px-12">
-        {/* 画面タブ */}
-        <div className="flex gap-2 border-b border-paper-line">
+      <section className="mx-auto max-w-5xl px-6 py-8 md:flex md:items-start md:gap-8 md:px-12">
+        {/* 画面タブ: PCは左サイドバー、スマホは下部固定バー */}
+        <nav className="hidden shrink-0 flex-col gap-1 md:flex md:w-44">
           {TABS.map((tab) => (
             <button
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
-              className={`-mb-px rounded-t-lg px-3 py-2 text-sm font-medium ${
+              className={`rounded-lg px-3 py-2 text-left text-sm font-medium ${
                 activeTab === tab.key
-                  ? "border-b-2 border-teal text-ink-text"
-                  : "text-ink-text/50"
+                  ? "bg-ink text-paper"
+                  : "text-ink-text/60 hover:bg-paper-line/40"
               }`}
             >
               {tab.label}
             </button>
           ))}
-        </div>
+        </nav>
 
+        <nav className="fixed inset-x-0 bottom-0 z-10 flex border-t border-paper-line bg-paper pb-[env(safe-area-inset-bottom,0px)] md:hidden">
+          {TABS.map((tab) => (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              className={`flex-1 py-3 text-center text-sm font-medium ${
+                activeTab === tab.key ? "text-teal" : "text-ink-text/50"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </nav>
+
+        <div className="min-w-0 flex-1 pb-24 md:pb-0">
         {activeTab === "checklist" && (
           <div className="mt-6">
             <ChecklistTab tripId={tripId} members={members} />
@@ -381,8 +396,11 @@ export default function TripScreen({ tripId }: { tripId: string }) {
                       </div>
                     )}
                     <div className="flex items-start gap-3 rounded-2xl border border-paper-line bg-white/60 px-4 py-3">
-                      <div className="w-14 shrink-0 pt-1 text-sm text-ink-text/60">
-                        {item.start_time ? item.start_time.slice(0, 5) : ""}
+                      <div className="w-16 shrink-0 pt-1 text-sm text-ink-text/60">
+                        {item.start_time && <div>{item.start_time.slice(0, 5)}</div>}
+                        {item.end_time && (
+                          <div className="text-xs text-ink-text/40">〜{item.end_time.slice(0, 5)}</div>
+                        )}
                       </div>
                       <div className="flex-1">
                         <p className="font-medium text-ink-text">{item.title}</p>
@@ -476,6 +494,7 @@ export default function TripScreen({ tripId }: { tripId: string }) {
             </form>
           </>
         )}
+        </div>
       </section>
     </main>
   );
