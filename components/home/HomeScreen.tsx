@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { useSupabaseUser } from "@/lib/supabase/useUser";
 import type { Trip } from "@/types/trip";
 
 function formatDateRange(start: string | null, end: string | null) {
@@ -17,9 +19,17 @@ function formatDateRange(start: string | null, end: string | null) {
 
 export default function HomeScreen() {
   const supabase = createClient();
+  const router = useRouter();
+  // セッションが全く無い(初めての訪問)場合は自動ログインせず、/login に委ねる
+  const { userId, ready } = useSupabaseUser({ autoAnonymous: false });
+
+  useEffect(() => {
+    if (ready && !userId) {
+      router.replace("/login");
+    }
+  }, [ready, userId, router]);
 
   const [loading, setLoading] = useState(true);
-  const [userId, setUserId] = useState<string | null>(null);
   const [trips, setTrips] = useState<Trip[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -33,30 +43,7 @@ export default function HomeScreen() {
   const [joining, setJoining] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
 
-  useEffect(() => {
-    init();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  async function init() {
-    const { data: sessionData } = await supabase.auth.getSession();
-    let uid = sessionData.session?.user.id ?? null;
-
-    if (!uid) {
-      const { data, error: signInError } = await supabase.auth.signInAnonymously();
-      if (signInError) {
-        setError("ログインに失敗しました。ページを再読み込みしてください。");
-        setLoading(false);
-        return;
-      }
-      uid = data.user?.id ?? null;
-    }
-
-    setUserId(uid);
-    await loadTrips(uid);
-  }
-
-  async function loadTrips(uid: string | null) {
+  const loadTrips = useCallback(async (uid: string | null) => {
     if (!uid) return;
     const { data, error: fetchError } = await supabase
       .from("trip_members")
@@ -76,7 +63,14 @@ export default function HomeScreen() {
 
     setTrips(list);
     setLoading(false);
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!ready || !userId) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- ログイン後の初回データ取得のため意図的
+    loadTrips(userId);
+  }, [ready, userId, loadTrips]);
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -129,12 +123,22 @@ export default function HomeScreen() {
   return (
     <main className="min-h-screen bg-paper">
       <section className="rounded-b-[2.5rem] bg-ink px-6 py-14 text-paper md:px-12 md:py-20">
-        <h1 className="font-display text-4xl text-amber md:text-6xl">
-          Tripchat
-        </h1>
-        <p className="mt-3 max-w-md text-paper/80">
-          計画から精算まで、これひとつで完結する旅のしおり。
-        </p>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="font-display text-4xl text-amber md:text-6xl">
+              Tripchat
+            </h1>
+            <p className="mt-3 max-w-md text-paper/80">
+              計画から精算まで、これひとつで完結する旅のしおり。
+            </p>
+          </div>
+          <Link
+            href="/account"
+            className="shrink-0 rounded-lg border border-paper/30 px-3 py-1.5 text-sm text-paper/80 hover:bg-paper/10"
+          >
+            アカウント
+          </Link>
+        </div>
       </section>
 
       <section className="mx-auto grid max-w-4xl gap-10 px-6 py-12 md:grid-cols-[1fr_260px] md:px-12">

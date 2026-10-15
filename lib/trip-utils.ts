@@ -1,4 +1,15 @@
-export type TravelMode = "walking" | "driving" | "transit";
+/**
+ * 移動手段。"driving" は以前の「車」(タクシー/自家用車を距離で自動切替)で、
+ * 既存データとの互換のために残している。新規では taxi / rental / car を使う。
+ */
+export type TravelMode =
+  | "walking"
+  | "bus"
+  | "transit"
+  | "taxi"
+  | "rental"
+  | "car"
+  | "driving";
 
 export type TimelineItem = {
   id: string;

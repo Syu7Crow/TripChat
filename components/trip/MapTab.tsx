@@ -17,10 +17,12 @@ export default function MapTab({
   trip,
   dayNumber,
   dayItems,
+  onAddSpot,
 }: {
   trip: TripInfo;
   dayNumber: number;
   dayItems: TimelineItem[];
+  onAddSpot: (name: string, lat: number, lng: number) => void;
 }) {
   const spots = dayItems
     .filter((item): item is TimelineItem & { lat: number; lng: number } =>
@@ -31,17 +33,17 @@ export default function MapTab({
   return (
     <div>
       <p className="text-sm text-ink-text/60">
-        {formatDayLabel(trip, dayNumber)}の、場所が登録されている予定を表示しています。
+        {formatDayLabel(trip, dayNumber)}の地図です。右上の「この範囲でスポットを探す」で、
+        カフェや観光地を探して予定に追加できます(地図を動かしてから押すと、その範囲で探します)。
       </p>
-      {spots.length === 0 ? (
-        <p className="mt-4 rounded-2xl border border-dashed border-paper-line px-4 py-8 text-center text-ink-text/50">
-          この日はまだ場所が登録された予定がありません。タイムラインで予定を追加するときに
-          「場所」を入力すると、ここに表示されます。
+      <div className="mt-4">
+        <MapView spots={spots} onAddSpot={onAddSpot} />
+      </div>
+      {spots.length === 0 && (
+        <p className="mt-3 text-xs text-ink-text/40">
+          この日はまだ場所が登録された予定がありません。見つけたスポットを追加するか、
+          タイムラインで予定の「場所」を入力してください。
         </p>
-      ) : (
-        <div className="mt-4">
-          <MapView spots={spots} />
-        </div>
       )}
     </div>
   );
