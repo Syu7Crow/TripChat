@@ -40,15 +40,9 @@ export default function LoginScreen() {
       </section>
 
       <section className="mx-auto max-w-md px-6 py-10 md:px-12">
-        <button
-          onClick={handleGuest}
-          disabled={startingGuest}
-          className="w-full rounded-lg bg-ink px-4 py-3 text-sm font-medium text-paper disabled:opacity-50"
-        >
-          {startingGuest ? "準備中…" : "アカウント登録せずに始める"}
-        </button>
+        
         <p className="mt-2 text-xs text-ink-text/40">
-          後からいつでもメール・Googleでアカウントを登録できます(途中で作ったデータはそのまま引き継がれます)。
+          後からいつでもユーザーID・Googleでアカウントを登録できます(途中で作ったデータはそのまま引き継がれます)。
         </p>
 
         <div className="my-6 flex items-center gap-3 text-xs text-ink-text/40">

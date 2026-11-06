@@ -31,6 +31,10 @@ export type TripInfo = {
   start_date: string | null;
   end_date: string | null;
   invite_code: string;
+  /** ヘッダーの色(#rrggbb)。null は初期色 */
+  header_color?: string | null;
+  /** ヘッダーの文字の色(#rrggbb)。null は初期色 */
+  header_text_color?: string | null;
 };
 
 /** 旅行の日程から日数を出す。日付が無ければ、既存の項目や手動追加分から推定する。 */

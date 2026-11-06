@@ -6,6 +6,9 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { useSupabaseUser } from "@/lib/supabase/useUser";
 import type { Trip } from "@/types/trip";
+import { resolveTheme } from "@/lib/theme";
+import { countUnreadChat } from "@/lib/unread";
+import Badge from "@/components/trip/Badge";
 
 function formatDateRange(start: string | null, end: string | null) {
   if (!start) return "日程未定";
@@ -31,6 +34,8 @@ export default function HomeScreen() {
 
   const [loading, setLoading] = useState(true);
   const [trips, setTrips] = useState<Trip[]>([]);
+  // 旅行ごとのチャット未読件数(カードのバッジ用)
+  const [unread, setUnread] = useState<Record<string, number>>({});
   const [error, setError] = useState<string | null>(null);
 
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -45,10 +50,21 @@ export default function HomeScreen() {
 
   const loadTrips = useCallback(async (uid: string | null) => {
     if (!uid) return;
-    const { data, error: fetchError } = await supabase
+    // 色の列(migration_theme.sql)が未適用でも一覧を出せるよう、失敗したら色なしで取り直す
+    const withColors = await supabase
       .from("trip_members")
-      .select("trip:trips(id, title, start_date, end_date)")
+      .select("trip:trips(id, title, start_date, end_date, header_color, header_text_color)")
       .eq("user_id", uid);
+    let rows: Array<{ trip: unknown }> | null = withColors.data;
+    let fetchError = withColors.error;
+    if (fetchError?.code === "42703") {
+      const fallback = await supabase
+        .from("trip_members")
+        .select("trip:trips(id, title, start_date, end_date)")
+        .eq("user_id", uid);
+      rows = fallback.data;
+      fetchError = fallback.error;
+    }
 
     if (fetchError) {
       setError("旅行の一覧を取得できませんでした。");
@@ -56,13 +72,19 @@ export default function HomeScreen() {
       return;
     }
 
-    const list = (data ?? [])
+    const list = (rows ?? [])
       .map((row) => row.trip as unknown as Trip)
       .filter(Boolean)
       .sort((a, b) => (a.start_date ?? "9999").localeCompare(b.start_date ?? "9999"));
 
     setTrips(list);
     setLoading(false);
+
+    // 未読件数は一覧を出した後に数える(遅くても一覧の表示は待たせない)
+    const counts = await Promise.all(
+      list.map(async (trip) => [trip.id, await countUnreadChat(supabase, trip.id, uid)] as const)
+    );
+    setUnread(Object.fromEntries(counts));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -112,7 +134,12 @@ export default function HomeScreen() {
     setJoining(false);
 
     if (joinRpcError || !tripId) {
-      setJoinError("招待コードが正しくないか、期限切れの可能性があります。");
+      // DB側のトリガー(migration_members.sql)が、BANされた人の参加を "BANNED" で拒否する
+      setJoinError(
+        joinRpcError?.message?.includes("BANNED")
+          ? "この旅行には参加できません(作成者によってBANされています)。"
+          : "招待コードが正しくないか、期限切れの可能性があります。"
+      );
       return;
     }
 
@@ -159,9 +186,11 @@ export default function HomeScreen() {
                   <span className="absolute -left-[29px] top-2 h-3 w-3 rounded-full bg-teal" />
                   <Link
                     href={`/trips/${trip.id}`}
-                    className="block rounded-2xl border border-paper-line bg-white/60 px-5 py-4 transition hover:border-teal"
+                    className="relative block rounded-2xl border border-paper-line bg-white/60 px-5 py-4 transition hover:border-teal"
+                    style={{ borderLeftWidth: 6, borderLeftColor: resolveTheme(trip).bg }}
                   >
-                    <p className="font-medium text-ink-text">{trip.title}</p>
+                    <Badge count={unread[trip.id] ?? 0} className="absolute right-4 top-4" />
+                    <p className="pr-10 font-medium text-ink-text">{trip.title}</p>
                     <p className="mt-1 text-sm text-ink-text/60">
                       {formatDateRange(trip.start_date, trip.end_date)}
                     </p>
