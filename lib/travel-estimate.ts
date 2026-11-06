@@ -225,13 +225,16 @@ export function planTransit(
 ): TransitPlan {
   if (!stationA || !stationB) return { status: "pending" };
 
+  // 通信エラーなどで駅情報が取得できなかった場合でも、エラー表示で落とさず、直線距離からの標準電車概算に自動フォールバックする
   if (stationA.status === "error" || stationB.status === "error") {
+    const ride = estimateTravel(straightKm, "transit");
     return {
-      status: "unavailable",
-      kind: "error",
-      reason: "最寄り駅の情報を取得できませんでした(通信エラー)",
+      status: "ok",
+      estimate: ride,
+      detail: "直線距離からの電車概算(駅情報取得失敗時の目安)",
     };
   }
+
   if (stationA.status === "none" || stationB.status === "none") {
     const where = stationA.status === "none" ? "出発地" : "目的地";
     return {

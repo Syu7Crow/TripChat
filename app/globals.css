@@ -19,10 +19,23 @@
 
 html {
   background: var(--color-paper);
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
   background: var(--color-paper);
   color: var(--color-ink-text);
   font-family: var(--font-body);
+  -webkit-tap-highlight-color: transparent;
+  min-height: 100dvh;
 }
+
+/* スクロールバー非表示ユーティリティ (横スクロールタブ等) */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+

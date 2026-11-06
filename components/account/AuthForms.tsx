@@ -213,7 +213,7 @@ export default function AuthForms({ redirectPath }: { redirectPath: string }) {
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             placeholder="例: yamada_123"
-            className="w-full rounded-lg border border-paper-line bg-white px-3 py-2 text-sm text-ink placeholder:text-ink-text/40 focus:border-teal focus:outline-none"
+            className="w-full rounded-lg border border-paper-line bg-white px-3 py-2 text-base sm:text-sm text-ink placeholder:text-ink-text/40 focus:border-teal focus:outline-none"
           />
         </div>
 
@@ -225,7 +225,7 @@ export default function AuthForms({ redirectPath }: { redirectPath: string }) {
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
               placeholder="例: やまだ"
-              className="w-full rounded-lg border border-paper-line bg-white px-3 py-2 text-sm text-ink placeholder:text-ink-text/40 focus:border-teal focus:outline-none"
+              className="w-full rounded-lg border border-paper-line bg-white px-3 py-2 text-base sm:text-sm text-ink placeholder:text-ink-text/40 focus:border-teal focus:outline-none"
             />
           </div>
         )}
@@ -238,7 +238,7 @@ export default function AuthForms({ redirectPath }: { redirectPath: string }) {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             placeholder="••••••••"
-            className="w-full rounded-lg border border-paper-line bg-white px-3 py-2 text-sm text-ink placeholder:text-ink-text/40 focus:border-teal focus:outline-none"
+            className="w-full rounded-lg border border-paper-line bg-white px-3 py-2 text-base sm:text-sm text-ink placeholder:text-ink-text/40 focus:border-teal focus:outline-none"
           />
         </div>
 
@@ -248,7 +248,7 @@ export default function AuthForms({ redirectPath }: { redirectPath: string }) {
         <button
           type="submit"
           disabled={submitting || !username.trim() || !password}
-          className="w-full rounded-lg bg-amber px-4 py-2.5 text-sm font-medium text-ink transition hover:opacity-90 disabled:opacity-50"
+          className="w-full rounded-lg bg-amber px-4 py-2.5 text-sm font-medium text-ink transition hover:opacity-90 disabled:opacity-50 cursor-pointer shadow-xs active:scale-95"
         >
           {submitting ? "処理中…" : mode === "register" ? "アカウントを作成する" : "ログインする"}
         </button>
@@ -264,7 +264,7 @@ export default function AuthForms({ redirectPath }: { redirectPath: string }) {
         type="button"
         onClick={handleGoogleLogin}
         disabled={submitting}
-        className="flex w-full items-center justify-center gap-2 rounded-lg border border-paper-line bg-white px-4 py-2 text-sm font-medium text-ink-text transition hover:bg-paper-line/20 disabled:opacity-50"
+        className="flex w-full items-center justify-center gap-2 rounded-lg border border-paper-line bg-white px-4 py-2.5 text-sm font-medium text-ink-text transition hover:bg-paper-line/20 disabled:opacity-50 cursor-pointer active:scale-95 shadow-2xs"
       >
         <svg className="h-4 w-4" viewBox="0 0 24 24">
           <path

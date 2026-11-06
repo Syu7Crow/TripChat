@@ -259,12 +259,12 @@ export default function SettingsTab({
           <input
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
-            className="flex-1 rounded-lg border border-paper-line bg-white px-3 py-2 text-sm"
+            className="flex-1 rounded-lg border border-paper-line bg-white px-3 py-2 text-base sm:text-sm text-ink focus:border-teal focus:outline-none"
           />
           <button
             type="submit"
             disabled={saving || !displayName.trim()}
-            className="rounded-lg bg-amber px-4 py-2 text-sm font-medium text-ink disabled:opacity-50"
+            className="rounded-lg bg-amber px-4 py-2 text-sm font-medium text-ink transition hover:opacity-90 disabled:opacity-50 cursor-pointer shadow-xs active:scale-95"
           >
             {saving ? "保存中…" : "保存"}
           </button>
@@ -385,7 +385,7 @@ export default function SettingsTab({
           <button
             onClick={handleSaveAvatar}
             disabled={savingAvatar || !avatarDirty || !avatarReady}
-            className="rounded-lg bg-amber px-4 py-2 text-sm font-medium text-ink disabled:opacity-50"
+            className="rounded-lg bg-amber px-4 py-2 text-sm font-medium text-ink transition hover:opacity-90 disabled:opacity-50 cursor-pointer shadow-xs active:scale-95"
           >
             {savingAvatar ? "保存中…" : "このアイコンで保存"}
           </button>

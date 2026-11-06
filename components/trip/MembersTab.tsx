@@ -280,9 +280,9 @@ export default function MembersTab({
         </p>
         <button
           onClick={copyCode}
-          className="mt-2 rounded-lg border border-paper-line bg-white px-3 py-1.5 font-mono text-sm text-ink-text hover:bg-paper-line/20"
+          className="mt-2.5 w-full sm:w-auto rounded-lg border border-paper-line bg-white px-3.5 py-2 font-mono text-sm text-ink-text hover:bg-paper-line/20 active:scale-95 transition cursor-pointer text-center shadow-2xs"
         >
-          {copied ? "コピーしました" : `${inviteCode}(タップでコピー)`}
+          {copied ? "✅ コピーしました！" : `${inviteCode} (タップでコピー)`}
         </button>
       </div>
     </div>

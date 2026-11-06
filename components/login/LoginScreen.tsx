@@ -31,23 +31,22 @@ export default function LoginScreen() {
   }
 
   return (
-    <main className="min-h-screen bg-paper">
-      <section className="rounded-b-[2.5rem] bg-ink px-6 py-14 text-paper md:px-12 md:py-20">
-        <h1 className="font-display text-4xl text-amber md:text-6xl">Tripchat</h1>
-        <p className="mt-3 max-w-md text-paper/80">
+    <main className="min-h-screen bg-paper pb-10">
+      <section className="rounded-b-[2rem] sm:rounded-b-[2.5rem] bg-ink px-5 py-10 sm:px-8 sm:py-14 text-paper md:px-12 md:py-20 shadow-xs">
+        <h1 className="font-display text-3xl sm:text-4xl text-amber md:text-6xl">Tripchat</h1>
+        <p className="mt-2 sm:mt-3 max-w-md text-sm sm:text-base text-paper/80">
           計画から精算まで、これひとつで完結する旅のしおり。
         </p>
       </section>
 
-      <section className="mx-auto max-w-md px-6 py-10 md:px-12">
-        
-        <p className="mt-2 text-xs text-ink-text/40">
+      <section className="mx-auto max-w-md px-4 py-8 sm:px-6 md:px-12">
+        <p className="text-xs text-ink-text/50">
           後からいつでもユーザーID・Googleでアカウントを登録できます(途中で作ったデータはそのまま引き継がれます)。
         </p>
 
-        <div className="my-6 flex items-center gap-3 text-xs text-ink-text/40">
+        <div className="my-5 flex items-center gap-3 text-xs text-ink-text/40">
           <span className="h-px flex-1 bg-paper-line" />
-          すでにアカウントをお持ちの方 / 新しく登録する方
+          ログイン / 新規登録
           <span className="h-px flex-1 bg-paper-line" />
         </div>
 
