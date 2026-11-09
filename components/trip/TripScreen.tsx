@@ -185,6 +185,19 @@ export default function TripScreen({ tripId }: { tripId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tripId]);
 
+  // タイムラインの予定だけを静かに取り直す。loadAll と違って画面全体を「読み込み中」にしないので、
+  // チャットを開いたまま(AIのプランを反映した直後など)でも、チャットが作り直されずに済む
+  const reloadItems = useCallback(async () => {
+    const { data, error: itemsError } = await supabase
+      .from("timeline_items")
+      .select("id, trip_id, day_number, position, start_time, end_time, title, note, lat, lng, travel_mode")
+      .eq("trip_id", tripId)
+      .order("day_number", { ascending: true })
+      .order("position", { ascending: true });
+    if (!itemsError) setItems((data ?? []) as TimelineItem[]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tripId]);
+
   // 初回読み込み: ログインが済んだらデータを取得
   useEffect(() => {
     if (!ready || !userId) return;
@@ -735,7 +748,7 @@ export default function TripScreen({ tripId }: { tripId: string }) {
               members={members}
               trip={trip}
               timelineItems={items}
-              onTimelineUpdated={loadAll}
+              onTimelineUpdated={reloadItems}
             />
           </div>
         )}

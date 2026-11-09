@@ -6,6 +6,7 @@ import { useSupabaseUser } from "@/lib/supabase/useUser";
 import { geocodeAddress } from "@/lib/geocode";
 import type { TimelineItem, TripInfo } from "@/lib/trip-utils";
 import Avatar from "./Avatar";
+import { sanitizeSuggestedItems, type AiPayload, type AiSuggestedItem } from "@/lib/ai-chat";
 
 type Message = {
   id: string;
@@ -23,29 +24,99 @@ type Member = {
   avatar_url?: string | null;
 };
 
-type AiSuggestedItem = {
-  day_number: number;
-  title: string;
-  start_time?: string;
-  end_time?: string;
-  note?: string;
-};
-
-type AiPayload = {
-  message: string;
-  suggestedItems?: AiSuggestedItem[];
-};
-
 const AI_PREFIX = "[TRIPCHAT_AI]:";
 
-function parseAiMessage(body: string): AiPayload | null {
-  if (!body.startsWith(AI_PREFIX)) return null;
-  try {
-    const jsonStr = body.slice(AI_PREFIX.length);
-    return JSON.parse(jsonStr) as AiPayload;
-  } catch {
-    return null;
+function cleanDisplayMessage(text: string): string {
+  if (!text) return "";
+  let clean = text.trim();
+
+  // [TRIPCHAT_AI]: プレフィックスの除去
+  if (clean.includes("[TRIPCHAT_AI]")) {
+    clean = clean.replace(/\[TRIPCHAT_AI\]:?\s*/g, "");
   }
+
+  // もし {"message": "..."} のようなJSON文字列がそのまま入っていたら抽出
+  if (clean.startsWith("{") && clean.endsWith("}")) {
+    try {
+      const obj = JSON.parse(clean);
+      if (typeof obj.message === "string") {
+        return cleanDisplayMessage(obj.message);
+      }
+    } catch {}
+  }
+
+  // ```json ... ``` コードブロック記法が残っていたら除去
+  clean = clean.replace(/```(?:json)?\s*([\s\S]*?)\s*```/gi, "$1");
+
+  return clean.trim();
+}
+
+function parseAiMessage(body: string): AiPayload | null {
+  if (!body) return null;
+  const trimmed = body.trim();
+
+  // [TRIPCHAT_AI] または [TRIPCHAT_AI]: で始まる、または含まれているかを検出
+  const isAi = trimmed.startsWith(AI_PREFIX) || trimmed.includes("[TRIPCHAT_AI]");
+  if (!isAi) return null;
+
+  // プレフィックスを取り除く
+  let raw = trimmed;
+  if (raw.startsWith(AI_PREFIX)) {
+    raw = raw.slice(AI_PREFIX.length).trim();
+  } else {
+    const idx = raw.indexOf("[TRIPCHAT_AI]");
+    raw = raw.slice(idx + "[TRIPCHAT_AI]".length).replace(/^:\s*/, "").trim();
+  }
+
+  // 1. JSONパースを試みる
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object") {
+      const rawMsg = typeof parsed.message === "string" ? parsed.message : JSON.stringify(parsed.message || "");
+      const items = sanitizeSuggestedItems(parsed.suggestedItems);
+      return {
+        message: cleanDisplayMessage(rawMsg),
+        suggestedItems: items,
+      };
+    }
+  } catch {}
+
+  // 2. { ... } の抽出を試みる
+  const firstBrace = raw.indexOf("{");
+  const lastBrace = raw.lastIndexOf("}");
+  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+    try {
+      const jsonSnippet = raw.slice(firstBrace, lastBrace + 1);
+      const parsed = JSON.parse(jsonSnippet);
+      if (parsed && typeof parsed === "object") {
+        const rawMsg = typeof parsed.message === "string" ? parsed.message : "";
+        const items = sanitizeSuggestedItems(parsed.suggestedItems);
+        return {
+          message: cleanDisplayMessage(rawMsg || raw),
+          suggestedItems: items,
+        };
+      }
+    } catch {}
+  }
+
+  // 3. 正規表現で message の中身を抽出
+  const msgMatch = raw.match(/"message"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/);
+  if (msgMatch) {
+    try {
+      const unescaped = JSON.parse(`"${msgMatch[1]}"`);
+      return {
+        message: cleanDisplayMessage(unescaped),
+        suggestedItems: [],
+      };
+    } catch {}
+  }
+
+  // 4. パースできなくても、AIメッセージであることは確定しているため、
+  // 決して null にせず、AIメッセージとして安全にテキストを表示する！
+  return {
+    message: cleanDisplayMessage(raw),
+    suggestedItems: [],
+  };
 }
 
 export default function ChatTab({
@@ -71,6 +142,8 @@ export default function ChatTab({
   const [aiThinking, setAiThinking] = useState(false);
   const [appliedItemIds, setAppliedItemIds] = useState<Record<string, boolean>>({});
   const [applyingPlanId, setApplyingPlanId] = useState<string | null>(null);
+  // AIの呼び出しやタイムライン反映に失敗したときの理由。retryQuery があれば「もう一度」で再試行できる
+  const [aiError, setAiError] = useState<{ message: string; retryQuery?: string } | null>(null);
 
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -121,6 +194,7 @@ export default function ChatTab({
   // AIに相談して返答を受け取る
   async function callAiAssistant(userQuery: string) {
     setAiThinking(true);
+    setAiError(null);
     try {
       // 直近のチャット履歴を整形
       const recentChat = messages.slice(-6).map((m) => {
@@ -131,44 +205,60 @@ export default function ChatTab({
         return { sender: memberName(m.user_id), body: m.body };
       });
 
-      const res = await fetch("/api/ai/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          tripId,
-          userMessage: userQuery,
-          tripContext: {
-            title: trip?.title,
-            start_date: trip?.start_date,
-            end_date: trip?.end_date,
-            timelineItems: timelineItems.map((item) => ({
-              day_number: item.day_number,
-              title: item.title,
-              start_time: item.start_time,
-              end_time: item.end_time,
-              note: item.note,
-            })),
-            recentMessages: recentChat,
-          },
-        }),
-      });
-
-      if (!res.ok) {
-        throw new Error("AIの呼び出しに失敗しました");
+      let res: Response;
+      try {
+        res = await fetch("/api/ai/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            tripId,
+            userMessage: userQuery,
+            tripContext: {
+              title: trip?.title,
+              start_date: trip?.start_date,
+              end_date: trip?.end_date,
+              timelineItems: timelineItems.map((item) => ({
+                day_number: item.day_number,
+                title: item.title,
+                start_time: item.start_time,
+                end_time: item.end_time,
+                note: item.note,
+              })),
+              recentMessages: recentChat,
+            },
+          }),
+        });
+      } catch {
+        throw new Error("通信に失敗しました。電波の状態を確認して、もう一度お試しください。");
       }
 
-      const aiResponse: AiPayload = await res.json();
+      // サーバーは、失敗の理由を { error: "..." } で返してくる。それをそのまま画面に出す
+      const aiResponse = await res.json().catch(() => null);
+      if (!res.ok || !aiResponse || typeof aiResponse.message !== "string") {
+        throw new Error(
+          aiResponse?.error ?? "AIの呼び出しに失敗しました。時間をおいてもう一度お試しください。"
+        );
+      }
 
       // AIメッセージをチャットに保存してグループ全員に共有
-      const aiBody = `${AI_PREFIX}${JSON.stringify(aiResponse)}`;
-      await supabase.from("trip_messages").insert({
+      const payload: AiPayload = {
+        message: aiResponse.message,
+        suggestedItems: sanitizeSuggestedItems(aiResponse.suggestedItems),
+      };
+      const { error: insertError } = await supabase.from("trip_messages").insert({
         trip_id: tripId,
         user_id: userId,
-        body: aiBody,
+        body: `${AI_PREFIX}${JSON.stringify(payload)}`,
       });
+      if (insertError) {
+        throw new Error("AIの返答をチャットに保存できませんでした。もう一度お試しください。");
+      }
     } catch (err) {
       console.error(err);
-      alert("AIからの応答の取得に失敗しました。少し時間をおいて再度お試しください。");
+      setAiError({
+        message: err instanceof Error ? err.message : "AIからの応答の取得に失敗しました。",
+        retryQuery: userQuery,
+      });
     } finally {
       setAiThinking(false);
     }
@@ -221,13 +311,30 @@ export default function ChatTab({
     await callAiAssistant(promptText);
   }
 
+  // すでにタイムラインにある予定か(同じ日・同じタイトル)。二重に追加しないための判定
+  const planKey = (day: number, title: string) => `${day || 1}|${title.trim()}`;
+  const isPlanApplied = (items: AiSuggestedItem[]) =>
+    items.length > 0 &&
+    items.every((item) =>
+      timelineItems.some((t) => planKey(t.day_number, t.title) === planKey(item.day_number, item.title))
+    );
+
   // AIが提案したスケジュールをタイムラインに一括反映
   async function handleApplySuggestedItems(messageId: string, items: AiSuggestedItem[]) {
     if (items.length === 0) return;
     setApplyingPlanId(messageId);
+    setAiError(null);
 
     try {
+      const existing = new Set(timelineItems.map((t) => planKey(t.day_number, t.title)));
+      // 日ごとの「次に使う並び順」。同じ日に何件も足しても、順番が重ならないようにする
+      const nextPosition = new Map<number, number>();
+
       for (const item of items) {
+        const day = item.day_number || 1;
+        if (existing.has(planKey(day, item.title))) continue; // 追加済みの予定は飛ばす
+        existing.add(planKey(day, item.title));
+
         // 場所から緯度経度を検索
         let lat: number | null = null;
         let lng: number | null = null;
@@ -241,14 +348,15 @@ export default function ChatTab({
           // ジオコーディング失敗時は位置なしで追加
         }
 
-        const maxPos = timelineItems
-          .filter((t) => t.day_number === item.day_number)
-          .reduce((max, t) => Math.max(max, t.position), 0);
+        const basePosition =
+          nextPosition.get(day) ??
+          timelineItems.filter((t) => t.day_number === day).reduce((max, t) => Math.max(max, t.position), 0);
+        nextPosition.set(day, basePosition + 1000);
 
-        await supabase.from("timeline_items").insert({
+        const { error } = await supabase.from("timeline_items").insert({
           trip_id: tripId,
-          day_number: item.day_number || 1,
-          position: maxPos + 1000,
+          day_number: day,
+          position: basePosition + 1000,
           title: item.title,
           start_time: item.start_time || null,
           end_time: item.end_time || null,
@@ -256,13 +364,17 @@ export default function ChatTab({
           lat,
           lng,
         });
+        if (error) throw error;
       }
 
       setAppliedItemIds((prev) => ({ ...prev, [messageId]: true }));
       onTimelineUpdated?.();
     } catch (err) {
       console.error(err);
-      alert("タイムラインへの反映中にエラーが発生しました。");
+      setAiError({
+        message:
+          "タイムラインへの反映に失敗しました。一部だけ追加されている場合があります。タイムラインを確認してから、もう一度お試しください。",
+      });
     } finally {
       setApplyingPlanId(null);
     }
@@ -286,7 +398,7 @@ export default function ChatTab({
 
           // AIメッセージのレンダリング
           if (aiPayload) {
-            const isApplied = appliedItemIds[m.id];
+            const isApplied = appliedItemIds[m.id] || isPlanApplied(aiPayload.suggestedItems ?? []);
             const isApplying = applyingPlanId === m.id;
 
             return (
@@ -384,6 +496,34 @@ export default function ChatTab({
 
         <div ref={bottomRef} />
       </div>
+
+      {/* AIの呼び出し・反映に失敗したときの理由と、やり直しボタン */}
+      {aiError && (
+        <div
+          role="alert"
+          className="flex items-start gap-2 border-t border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800"
+        >
+          <p className="min-w-0 flex-1 leading-relaxed">{aiError.message}</p>
+          {aiError.retryQuery && (
+            <button
+              type="button"
+              onClick={() => callAiAssistant(aiError.retryQuery as string)}
+              disabled={aiThinking}
+              className="min-h-9 shrink-0 rounded-md border border-red-300 bg-white px-3 font-medium text-red-700 active:bg-red-100 disabled:opacity-50"
+            >
+              もう一度
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setAiError(null)}
+            aria-label="閉じる"
+            className="min-h-9 shrink-0 px-2 text-red-700"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* AIクイック相談ショートカットボタン（横スクロール） */}
       <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar border-t border-paper-line bg-paper/50 px-3 py-2 text-xs whitespace-nowrap">
