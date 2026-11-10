@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 type AddTimelineModalProps = {
@@ -39,6 +39,12 @@ export default function AddTimelineModal({
   const [location, setLocation] = useState("");
   const [note, setNote] = useState("");
 
+  // 下スワイプで閉じるドラッグジェスチャーの状態
+  const [translateY, setTranslateY] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStartY = useRef(0);
+  const currentTranslateY = useRef(0);
+
   useEffect(() => {
     setMounted(true);
   }, []);
@@ -51,6 +57,9 @@ export default function AddTimelineModal({
       setEndTime("");
       setLocation("");
       setNote("");
+      setTranslateY(0);
+      currentTranslateY.current = 0;
+      setIsDragging(false);
     }
   }, [isOpen, initialDayNumber]);
 
@@ -74,6 +83,43 @@ export default function AddTimelineModal({
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isOpen, onClose]);
+
+  // スワイプダウン（ドラッグして閉じる）ハンドラー
+  function handleTouchStart(e: React.TouchEvent) {
+    dragStartY.current = e.touches[0].clientY;
+    setIsDragging(true);
+  }
+
+  function handleTouchMove(e: React.TouchEvent) {
+    if (!isDragging) return;
+    const deltaY = e.touches[0].clientY - dragStartY.current;
+    if (deltaY > 0) {
+      // 下方向へのドラッグ
+      currentTranslateY.current = deltaY;
+      setTranslateY(deltaY);
+    } else {
+      // 上方向への引き上げには抵抗をつける
+      currentTranslateY.current = deltaY * 0.15;
+      setTranslateY(deltaY * 0.15);
+    }
+  }
+
+  function handleTouchEnd() {
+    setIsDragging(false);
+    // 80px以上下にドラッグした場合に閉じる
+    if (currentTranslateY.current > 80) {
+      setTranslateY(400); // 下にスムーズに退場
+      setTimeout(() => {
+        onClose();
+        setTranslateY(0);
+        currentTranslateY.current = 0;
+      }, 180);
+    } else {
+      // 元の位置にスナップバック
+      setTranslateY(0);
+      currentTranslateY.current = 0;
+    }
+  }
 
   if (!mounted || !isOpen) return null;
 
@@ -103,13 +149,32 @@ export default function AddTimelineModal({
 
       {/* ボトムシート / モーダル本体 */}
       <div
-        className="relative w-full max-w-lg rounded-t-3xl sm:rounded-2xl border-t sm:border border-paper-line bg-paper p-5 sm:p-6 shadow-2xl max-h-[92dvh] overflow-y-auto z-10 animate-in slide-in-from-bottom duration-200"
+        className="relative w-full max-w-lg rounded-t-3xl sm:rounded-2xl border-t sm:border border-paper-line bg-paper px-5 pt-3 pb-[calc(env(safe-area-inset-bottom,0px)+20px)] sm:p-6 shadow-2xl max-h-[92dvh] overflow-y-auto z-10 will-change-transform"
+        style={{
+          transform: translateY !== 0 ? `translateY(${Math.max(0, translateY)}px)` : undefined,
+          transition: isDragging
+            ? "none"
+            : "transform 0.22s cubic-bezier(0.16, 1, 0.3, 1)",
+        }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* スマホ用ドラッグハンドルバー */}
-        <div className="w-12 h-1.5 bg-ink/20 rounded-full mx-auto mb-3 sm:hidden" />
+        {/* スマホ用ドラッグハンドル領域（スワイプダウンで閉じるタッチ領域） */}
+        <div
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+          className="w-full py-2.5 -mt-1 mb-1 flex items-center justify-center cursor-grab active:cursor-grabbing sm:hidden touch-none select-none"
+        >
+          <div className="w-12 h-1.5 bg-ink/30 rounded-full transition-transform active:scale-110" />
+        </div>
 
-        <div className="flex items-center justify-between border-b border-paper-line pb-3">
+        {/* ヘッダー部（ここもスワイプダウン操作に対応） */}
+        <div
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+          className="flex items-center justify-between border-b border-paper-line pb-3 select-none touch-none"
+        >
           <h2 className="font-display text-lg font-bold text-ink">新しい予定を追加</h2>
           <button
             type="button"
@@ -134,7 +199,7 @@ export default function AddTimelineModal({
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="予定名 (例: 浅草寺を観光)"
-              className="w-full min-h-[46px] rounded-xl border border-paper-line bg-white px-3.5 py-2.5 text-base sm:text-sm text-ink placeholder:text-ink-text/40 focus:border-teal focus:outline-none shadow-2xs"
+              className="w-full min-h-[46px] rounded-xl border border-paper-line bg-white px-3.5 py-2.5 text-base sm:text-sm text-ink placeholder:text-ink-text/40 focus:border-teal focus:outline-none shadow-2xs box-border"
             />
           </div>
 
@@ -144,7 +209,7 @@ export default function AddTimelineModal({
             <select
               value={dayNumber}
               onChange={(e) => setDayNumber(Number(e.target.value))}
-              className="w-full min-h-[46px] rounded-xl border border-paper-line bg-white px-3.5 py-2.5 text-base sm:text-sm text-ink focus:border-teal focus:outline-none shadow-2xs"
+              className="w-full min-h-[46px] rounded-xl border border-paper-line bg-white px-3.5 py-2.5 text-base sm:text-sm text-ink focus:border-teal focus:outline-none shadow-2xs box-border"
             >
               {dayNumbers.map((d) => (
                 <option key={d} value={d}>
@@ -154,24 +219,24 @@ export default function AddTimelineModal({
             </select>
           </div>
 
-          {/* 開始・終了時間 */}
-          <div className="grid grid-cols-2 gap-2.5">
-            <div>
+          {/* 開始・終了時間（iPhone等で横幅がはみ出ないよう min-w-0 / box-border を指定） */}
+          <div className="grid grid-cols-2 gap-2 sm:gap-2.5">
+            <div className="min-w-0">
               <label className="block text-xs font-semibold text-ink-text/70 mb-1">開始時間</label>
               <input
                 type="time"
                 value={startTime}
                 onChange={(e) => setStartTime(e.target.value)}
-                className="w-full min-h-[46px] rounded-xl border border-paper-line bg-white px-3 py-2 text-base sm:text-sm text-ink focus:border-teal focus:outline-none shadow-2xs"
+                className="w-full min-w-0 min-h-[46px] rounded-xl border border-paper-line bg-white px-2.5 py-2 text-base sm:text-sm text-ink focus:border-teal focus:outline-none shadow-2xs box-border"
               />
             </div>
-            <div>
+            <div className="min-w-0">
               <label className="block text-xs font-semibold text-ink-text/70 mb-1">終了時間</label>
               <input
                 type="time"
                 value={endTime}
                 onChange={(e) => setEndTime(e.target.value)}
-                className="w-full min-h-[46px] rounded-xl border border-paper-line bg-white px-3 py-2 text-base sm:text-sm text-ink focus:border-teal focus:outline-none shadow-2xs"
+                className="w-full min-w-0 min-h-[46px] rounded-xl border border-paper-line bg-white px-2.5 py-2 text-base sm:text-sm text-ink focus:border-teal focus:outline-none shadow-2xs box-border"
               />
             </div>
           </div>
@@ -186,7 +251,7 @@ export default function AddTimelineModal({
               value={location}
               onChange={(e) => setLocation(e.target.value)}
               placeholder="住所やスポット名 (任意)"
-              className="w-full min-h-[46px] rounded-xl border border-paper-line bg-white px-3.5 py-2.5 text-base sm:text-sm text-ink placeholder:text-ink-text/40 focus:border-teal focus:outline-none shadow-2xs"
+              className="w-full min-h-[46px] rounded-xl border border-paper-line bg-white px-3.5 py-2.5 text-base sm:text-sm text-ink placeholder:text-ink-text/40 focus:border-teal focus:outline-none shadow-2xs box-border"
             />
           </div>
 
@@ -198,7 +263,7 @@ export default function AddTimelineModal({
               value={note}
               onChange={(e) => setNote(e.target.value)}
               placeholder="メモや持ち物など (任意)"
-              className="w-full rounded-xl border border-paper-line bg-white px-3.5 py-2.5 text-base sm:text-sm text-ink placeholder:text-ink-text/40 focus:border-teal focus:outline-none shadow-2xs resize-none"
+              className="w-full rounded-xl border border-paper-line bg-white px-3.5 py-2.5 text-base sm:text-sm text-ink placeholder:text-ink-text/40 focus:border-teal focus:outline-none shadow-2xs resize-none box-border"
             />
           </div>
 
@@ -207,11 +272,12 @@ export default function AddTimelineModal({
             <p className="whitespace-pre-line text-xs text-teal">{locationInfo}</p>
           )}
 
+          {/* 追加ボタン（iPhone下部セーフエリアと被らないよう余裕のある配置） */}
           <div className="pt-2">
             <button
               type="submit"
               disabled={adding || !title.trim()}
-              className="w-full min-h-[48px] rounded-xl bg-amber px-5 py-3 text-base font-bold text-ink transition hover:opacity-90 disabled:opacity-50 cursor-pointer shadow-sm active:scale-98"
+              className="w-full min-h-[50px] rounded-xl bg-amber px-5 py-3 text-base font-bold text-ink transition hover:opacity-90 disabled:opacity-50 cursor-pointer shadow-sm active:scale-98 flex items-center justify-center"
             >
               {adding ? "追加中…" : "この予定を追加する"}
             </button>
