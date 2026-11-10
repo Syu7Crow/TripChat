@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import type { LatLng } from "@/lib/geocode";
+import LocationPicker, { resolveLocation, EMPTY_LOCATION, type LocationValue, type ResolveStatus } from "./LocationPicker";
 
 type AddTimelineModalProps = {
   isOpen: boolean;
@@ -13,12 +15,19 @@ type AddTimelineModalProps = {
     dayNumber: number;
     startTime: string;
     endTime: string;
+    /** 利用者が入力した場所の文字 */
     location: string;
+    lat: number | null;
+    lng: number | null;
+    /** 位置の決まり方(自動で一番上の候補を使った / 見つからなかった、など) */
+    locationStatus: ResolveStatus;
+    /** 登録された場所の表示名(自動で決めたとき、画面にお知らせするため) */
+    locationLabel: string | null;
     note: string;
   }) => Promise<void>;
   adding: boolean;
-  locationNotice?: string | null;
-  locationInfo?: string | null;
+  /** 旅行中の他の予定の位置(場所検索で近くを優先するため) */
+  near?: LatLng | null;
 };
 
 export default function AddTimelineModal({
@@ -28,15 +37,15 @@ export default function AddTimelineModal({
   dayNumbers,
   onAdd,
   adding,
-  locationNotice,
-  locationInfo,
+  near,
 }: AddTimelineModalProps) {
   const [mounted, setMounted] = useState(false);
   const [title, setTitle] = useState("");
   const [dayNumber, setDayNumber] = useState(initialDayNumber);
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
-  const [location, setLocation] = useState("");
+  const [location, setLocation] = useState<LocationValue>(EMPTY_LOCATION);
+  const [resolving, setResolving] = useState(false);
   const [note, setNote] = useState("");
 
   // 下スワイプで閉じるドラッグジェスチャーの状態
@@ -55,7 +64,8 @@ export default function AddTimelineModal({
       setTitle("");
       setStartTime("");
       setEndTime("");
-      setLocation("");
+      setLocation(EMPTY_LOCATION);
+      setResolving(false);
       setNote("");
       setTranslateY(0);
       currentTranslateY.current = 0;
@@ -125,14 +135,23 @@ export default function AddTimelineModal({
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!title.trim() || adding) return;
+    if (!title.trim() || adding || resolving) return;
+
+    // 入力だけして候補を選んでいない場合は、ここで検索して一番上の候補を使う
+    setResolving(true);
+    const resolved = await resolveLocation(location, near);
+    setResolving(false);
 
     await onAdd({
       title: title.trim(),
       dayNumber,
       startTime,
       endTime,
-      location,
+      location: resolved.value.text.trim(),
+      lat: resolved.value.lat,
+      lng: resolved.value.lng,
+      locationStatus: resolved.status,
+      locationLabel: resolved.value.label,
       note,
     });
     onClose();
@@ -220,7 +239,7 @@ export default function AddTimelineModal({
           </div>
 
           {/* 開始・終了時間（iPhone等で横幅がはみ出ないよう min-w-0 / box-border を指定） */}
-          <div className="grid grid-cols-2 gap-2 sm:gap-2.5">
+          <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2 sm:gap-2.5">
             <div className="min-w-0">
               <label className="block text-xs font-semibold text-ink-text/70 mb-1">開始時間</label>
               <input
@@ -246,13 +265,7 @@ export default function AddTimelineModal({
             <label className="block text-xs font-semibold text-ink-text/70 mb-1">
               場所・住所 (地図・移動時間用)
             </label>
-            <input
-              type="text"
-              value={location}
-              onChange={(e) => setLocation(e.target.value)}
-              placeholder="住所やスポット名 (任意)"
-              className="w-full min-h-[46px] rounded-xl border border-paper-line bg-white px-3.5 py-2.5 text-base sm:text-sm text-ink placeholder:text-ink-text/40 focus:border-teal focus:outline-none shadow-2xs box-border"
-            />
+            <LocationPicker value={location} onChange={setLocation} near={near} />
           </div>
 
           {/* メモ */}
@@ -267,19 +280,14 @@ export default function AddTimelineModal({
             />
           </div>
 
-          {locationNotice && <p className="text-xs text-amber-dark">{locationNotice}</p>}
-          {locationInfo && (
-            <p className="whitespace-pre-line text-xs text-teal">{locationInfo}</p>
-          )}
-
           {/* 追加ボタン（iPhone下部セーフエリアと被らないよう余裕のある配置） */}
           <div className="pt-2">
             <button
               type="submit"
-              disabled={adding || !title.trim()}
+              disabled={adding || resolving || !title.trim()}
               className="w-full min-h-[50px] rounded-xl bg-amber px-5 py-3 text-base font-bold text-ink transition hover:opacity-90 disabled:opacity-50 cursor-pointer shadow-sm active:scale-98 flex items-center justify-center"
             >
-              {adding ? "追加中…" : "この予定を追加する"}
+              {resolving ? "場所を検索中…" : adding ? "追加中…" : "この予定を追加する"}
             </button>
           </div>
         </form>

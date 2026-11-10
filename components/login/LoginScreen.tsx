@@ -51,7 +51,7 @@ export default function LoginScreen() {
             Tripchat
           </h1>
           <p className="mt-1 text-xs sm:text-sm text-paper/80">
-            計画から精算まで、これひとつで完結する旅のしおり
+            旅行の計画をこれひとつで完結する旅のしおり
           </p>
         </div>
       </header>

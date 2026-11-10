@@ -3,8 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { createClient } from "@/lib/supabase/client";
-import { geocodeAddress } from "@/lib/geocode";
-import type { TimelineItem } from "@/lib/trip-utils";
+import type { LatLng } from "@/lib/geocode";
+import { TIMELINE_ITEM_COLUMNS, type TimelineItem } from "@/lib/trip-utils";
+import LocationPicker, { resolveLocation, type LocationValue, EMPTY_LOCATION } from "./LocationPicker";
 
 type EditTimelineModalProps = {
   item: TimelineItem | null;
@@ -12,6 +13,8 @@ type EditTimelineModalProps = {
   isOpen: boolean;
   onClose: () => void;
   onSave: (updatedItem: TimelineItem) => void;
+  /** 旅行中の他の予定の位置(場所検索で近くを優先するため) */
+  near?: LatLng | null;
 };
 
 export default function EditTimelineModal({
@@ -20,6 +23,7 @@ export default function EditTimelineModal({
   isOpen,
   onClose,
   onSave,
+  near,
 }: EditTimelineModalProps) {
   const supabase = createClient();
   const [mounted, setMounted] = useState(false);
@@ -28,12 +32,16 @@ export default function EditTimelineModal({
   const [dayNumber, setDayNumber] = useState(1);
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
-  const [location, setLocation] = useState("");
-  const [clearLocation, setClearLocation] = useState(false);
+  const [location, setLocationState] = useState<LocationValue>(EMPTY_LOCATION);
+  // 「見つからない」と警告されたあと、もう一度保存を押したら位置情報なしで保存する
+  const [acceptNoLocation, setAcceptNoLocation] = useState(false);
+  function setLocation(v: LocationValue) {
+    setLocationState(v);
+    setAcceptNoLocation(false);
+  }
   const [note, setNote] = useState("");
 
   const [saving, setSaving] = useState(false);
-  const [locationNotice, setLocationNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // 下スワイプで閉じるドラッグジェスチャーの状態
@@ -53,10 +61,16 @@ export default function EditTimelineModal({
       setDayNumber(item.day_number);
       setStartTime(item.start_time ? item.start_time.slice(0, 5) : "");
       setEndTime(item.end_time ? item.end_time.slice(0, 5) : "");
-      setLocation("");
-      setClearLocation(false);
+      setLocationState({
+        text: item.location_text ?? "",
+        lat: item.lat,
+        lng: item.lng,
+        resolvedText: item.location_text ?? "",
+        label: item.lat !== null && item.lng !== null ? "保存済みの位置" : null,
+        how: item.lat !== null && item.lng !== null ? "saved" : null,
+      });
       setNote(item.note ?? "");
-      setLocationNotice(null);
+      setAcceptNoLocation(false);
       setError(null);
       setTranslateY(0);
       currentTranslateY.current = 0;
@@ -130,26 +144,25 @@ export default function EditTimelineModal({
 
     setSaving(true);
     setError(null);
-    setLocationNotice(null);
 
-    let lat = item.lat;
-    let lng = item.lng;
+    // 入力だけして候補を選んでいない場合は、ここで検索して一番上の候補を使う
+    const resolved = await resolveLocation(location, near);
+    let loc = resolved.value;
 
-    // 位置情報のクリアまたは再検索
-    if (clearLocation) {
-      lat = null;
-      lng = null;
-    } else if (location.trim()) {
-      try {
-        const geo = await geocodeAddress(location.trim());
-        if (geo) {
-          lat = geo.lat;
-          lng = geo.lng;
-        } else {
-          setLocationNotice(`「${location}」の位置情報が見つかりませんでした。位置は変更されません。`);
-        }
-      } catch {
-        setLocationNotice("位置情報の検索中にエラーが発生しました。");
+    if (resolved.status === "failed" || resolved.status === "error") {
+      if (!acceptNoLocation) {
+        setSaving(false);
+        setAcceptNoLocation(true);
+        setError(
+          resolved.status === "error"
+            ? "場所の検索に接続できませんでした。通信状況を確認してください。このまま保存する場合は、もう一度「保存」を押してください(位置は変更されません)。"
+            : "場所が見つかりませんでした。「検索」で候補を選ぶか、地図でピンを置いてください。位置情報なしで保存する場合は、もう一度「保存」を押してください。"
+        );
+        return;
+      }
+      // 入力を変えたのに見つからない場合、古い位置は別の場所なので外す(通信エラー時は変更しない)
+      if (resolved.status === "failed") {
+        loc = { ...loc, lat: null, lng: null, resolvedText: null, label: null, how: null };
       }
     }
 
@@ -161,11 +174,12 @@ export default function EditTimelineModal({
         start_time: startTime || null,
         end_time: endTime || null,
         note: note.trim() || null,
-        lat,
-        lng,
+        lat: loc.lat,
+        lng: loc.lng,
+        location_text: loc.text.trim() || null,
       })
       .eq("id", item.id)
-      .select("id, trip_id, day_number, position, start_time, end_time, title, note, lat, lng, travel_mode")
+      .select(TIMELINE_ITEM_COLUMNS)
       .single();
 
     setSaving(false);
@@ -178,8 +192,6 @@ export default function EditTimelineModal({
     onSave(data as TimelineItem);
     onClose();
   }
-
-  const hasCoords = item.lat !== null && item.lng !== null;
 
   return createPortal(
     <div
@@ -265,62 +277,33 @@ export default function EditTimelineModal({
           </div>
 
           {/* 開始・終了時間 */}
-          <div className="grid grid-cols-2 gap-2.5">
-            <div>
+          <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2.5">
+            <div className="min-w-0">
               <label className="block text-xs font-semibold text-ink-text/70 mb-1">開始時間</label>
               <input
                 type="time"
                 value={startTime}
                 onChange={(e) => setStartTime(e.target.value)}
-                className="w-full rounded-lg border border-paper-line bg-white px-2.5 py-1.5 text-base sm:text-sm text-ink focus:border-teal focus:outline-none shadow-2xs"
+                className="w-full rounded-lg border border-paper-line bg-white min-h-[46px] px-2.5 py-1.5 text-base sm:text-sm text-ink focus:border-teal focus:outline-none shadow-2xs"
               />
             </div>
-            <div>
+            <div className="min-w-0">
               <label className="block text-xs font-semibold text-ink-text/70 mb-1">終了時間</label>
               <input
                 type="time"
                 value={endTime}
                 onChange={(e) => setEndTime(e.target.value)}
-                className="w-full rounded-lg border border-paper-line bg-white px-2.5 py-1.5 text-base sm:text-sm text-ink focus:border-teal focus:outline-none shadow-2xs"
+                className="w-full rounded-lg border border-paper-line bg-white min-h-[46px] px-2.5 py-1.5 text-base sm:text-sm text-ink focus:border-teal focus:outline-none shadow-2xs"
               />
             </div>
           </div>
 
           {/* 場所 */}
           <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="block text-xs font-semibold text-ink-text/70">
-                場所・住所 (地図・移動時間用)
-              </label>
-              {hasCoords && !clearLocation && (
-                <span className="text-[11px] text-teal font-medium">📍 位置情報登録済み</span>
-              )}
-              {(!hasCoords || clearLocation) && (
-                <span className="text-[11px] text-ink-text/40">位置情報なし</span>
-              )}
-            </div>
-            <input
-              type="text"
-              value={location}
-              onChange={(e) => {
-                setLocation(e.target.value);
-                if (e.target.value) setClearLocation(false);
-              }}
-              placeholder={hasCoords && !clearLocation ? "場所を変更する場合は入力…" : "スポット名や住所を入力…"}
-              className="w-full rounded-lg border border-paper-line bg-white px-3 py-2 text-base sm:text-sm text-ink placeholder:text-ink-text/40 focus:border-teal focus:outline-none shadow-2xs"
-            />
-            {hasCoords && !clearLocation && (
-              <label className="mt-1.5 flex items-center gap-1.5 text-xs text-ink-text/60 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={clearLocation}
-                  onChange={(e) => setClearLocation(e.target.checked)}
-                  className="rounded border-paper-line accent-teal h-3.5 w-3.5 cursor-pointer"
-                />
-                <span>位置情報を削除する</span>
-              </label>
-            )}
-            {locationNotice && <p className="mt-1 text-xs text-amber-dark">{locationNotice}</p>}
+            <label className="block text-xs font-semibold text-ink-text/70 mb-1">
+              場所・住所 (地図・移動時間用)
+            </label>
+            <LocationPicker value={location} onChange={setLocation} near={near} />
           </div>
 
           {/* メモ */}

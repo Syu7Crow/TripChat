@@ -39,3 +39,27 @@ body {
   scrollbar-width: none;
 }
 
+
+/*
+ * iOS Safari の <input type="time|date"> は、独自の最小幅を持つため、
+ * 2列グリッドに置くと隣の入力欄に重なってしまう。
+ * ネイティブの見た目を外して幅を親に合わせ、中身は左寄せにする。
+ */
+input[type="time"],
+input[type="date"] {
+  -webkit-appearance: none;
+  appearance: none;
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  text-align: left;
+  line-height: 1.5;
+}
+input[type="time"]::-webkit-date-and-time-value,
+input[type="date"]::-webkit-date-and-time-value {
+  text-align: left;
+  min-height: 1.5em;
+  margin: 0;
+}

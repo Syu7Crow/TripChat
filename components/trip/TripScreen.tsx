@@ -7,11 +7,12 @@ import { useSupabaseUser } from "@/lib/supabase/useUser";
 import {
   computeDayNumbers,
   formatDayLabel,
+  parseLocalDate,
+  TIMELINE_ITEM_COLUMNS,
   type TimelineItem,
   type TravelMode,
   type TripInfo,
 } from "@/lib/trip-utils";
-import { geocodeAddress } from "@/lib/geocode";
 import {
   estimateTravel,
   formatDuration,
@@ -28,6 +29,7 @@ import ChatTab from "./ChatTab";
 import SettingsTab from "./SettingsTab";
 import MembersTab, { type TripMember } from "./MembersTab";
 import TripThemeEditor from "./TripThemeEditor";
+import TripDateEditor from "./TripDateEditor";
 import { resolveTheme, type ThemeColors } from "@/lib/theme";
 import { countUnreadChat, markChatRead } from "@/lib/unread";
 import Avatar from "./Avatar";
@@ -199,14 +201,18 @@ export default function TripScreen({ tripId }: { tripId: string }) {
     activeTabRef.current = activeTab;
   }, [activeTab]);
 
-  const [newTitle, setNewTitle] = useState("");
-  const [newStart, setNewStart] = useState("");
-  const [newEnd, setNewEnd] = useState("");
-  const [newNote, setNewNote] = useState("");
-  const [newLocation, setNewLocation] = useState("");
   const [adding, setAdding] = useState(false);
-  const [locationNotice, setLocationNotice] = useState<string | null>(null);
-  const [locationInfo, setLocationInfo] = useState<string | null>(null);
+  // 場所の登録結果などを、モーダルが閉じたあとにも知らせるためのお知らせ
+  const [toast, setToast] = useState<{
+    kind: "info" | "warn";
+    text: string;
+    itemId?: string;
+  } | null>(null);
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 10000);
+    return () => clearTimeout(t);
+  }, [toast]);
 
   // メンバー一覧(名前・役割・参加日・アイコン)。設定の「更新」やプロフィール保存の後にも使う
   const loadMembers = useCallback(async () => {
@@ -295,7 +301,7 @@ export default function TripScreen({ tripId }: { tripId: string }) {
 
     const { data: itemRows, error: itemsError } = await supabase
       .from("timeline_items")
-      .select("id, trip_id, day_number, position, start_time, end_time, title, note, lat, lng, travel_mode")
+      .select(TIMELINE_ITEM_COLUMNS)
       .eq("trip_id", tripId)
       .order("day_number", { ascending: true })
       .order("position", { ascending: true });
@@ -313,7 +319,7 @@ export default function TripScreen({ tripId }: { tripId: string }) {
   const reloadItems = useCallback(async () => {
     const { data, error: itemsError } = await supabase
       .from("timeline_items")
-      .select("id, trip_id, day_number, position, start_time, end_time, title, note, lat, lng, travel_mode")
+      .select(TIMELINE_ITEM_COLUMNS)
       .eq("trip_id", tripId)
       .order("day_number", { ascending: true })
       .order("position", { ascending: true });
@@ -444,6 +450,17 @@ export default function TripScreen({ tripId }: { tripId: string }) {
     .filter((item) => item.day_number === activeDay)
     .sort((a, b) => a.position - b.position);
 
+  // 場所検索で「近く」を優先するための基準点: その日の予定、なければ旅行全体の予定の平均位置
+  const nearPoint = (() => {
+    const pool = dayItems.some((it) => it.lat !== null) ? dayItems : items;
+    const pts = pool.filter((it) => it.lat !== null && it.lng !== null);
+    if (pts.length === 0) return null;
+    return {
+      lat: pts.reduce((sum, it) => sum + (it.lat as number), 0) / pts.length,
+      lng: pts.reduce((sum, it) => sum + (it.lng as number), 0) / pts.length,
+    };
+  })();
+
   // 各予定の最寄り駅(電車が使えるかの判定に使う)
   const { stations, retry: retryStations } = useNearestStations(dayItems);
 
@@ -460,68 +477,12 @@ export default function TripScreen({ tripId }: { tripId: string }) {
         lat,
         lng,
       })
-      .select("id, trip_id, day_number, position, start_time, end_time, title, note, lat, lng, travel_mode")
+      .select(TIMELINE_ITEM_COLUMNS)
       .single();
 
     if (!insertError && data) {
       applyRealtimeChange("INSERT", data as TimelineItem, null);
     }
-  }
-
-  async function handleAddItem(e: React.FormEvent) {
-    e.preventDefault();
-    if (!newTitle.trim()) return;
-
-    setAdding(true);
-    setLocationNotice(null);
-    setLocationInfo(null);
-    const maxPosition = dayItems.reduce((max, item) => Math.max(max, item.position), 0);
-
-    let coords: { lat: number; lng: number } | null = null;
-    if (newLocation.trim()) {
-      const result = await geocodeAddress(newLocation.trim());
-      if (result) {
-        coords = { lat: result.lat, lng: result.lng };
-        // 別の場所に登録されて距離・金額がずれるのを防ぐため、何として登録したかを見せる
-        setLocationInfo(
-          `「${newTitle.trim()}」の位置: ${result.label}\n意図と違う場合は、場所の欄に住所や正式名称を入れて追加し直してください。`
-        );
-      } else {
-        setLocationNotice(
-          "場所が見つからなかったため、位置情報なしで追加しました(地図には表示されません)。"
-        );
-      }
-    }
-
-    const { data, error: insertError } = await supabase
-      .from("timeline_items")
-      .insert({
-        trip_id: tripId,
-        day_number: activeDay,
-        position: maxPosition + 1000,
-        start_time: newStart || null,
-        end_time: newEnd || null,
-        title: newTitle.trim(),
-        note: newNote || null,
-        lat: coords?.lat ?? null,
-        lng: coords?.lng ?? null,
-      })
-      .select("id, trip_id, day_number, position, start_time, end_time, title, note, lat, lng, travel_mode")
-      .single();
-    setAdding(false);
-
-    if (insertError || !data) {
-      setError("予定を追加できませんでした。時間をおいて試してください。");
-      return;
-    }
-
-    // Realtimeでも届くが、体感を早くするため即座に反映
-    applyRealtimeChange("INSERT", data as TimelineItem, null);
-    setNewTitle("");
-    setNewStart("");
-    setNewEnd("");
-    setNewNote("");
-    setNewLocation("");
   }
 
   async function handleAddModalItem(data: {
@@ -530,30 +491,18 @@ export default function TripScreen({ tripId }: { tripId: string }) {
     startTime: string;
     endTime: string;
     location: string;
+    lat: number | null;
+    lng: number | null;
+    locationStatus: "none" | "kept" | "auto" | "failed" | "error";
+    locationLabel: string | null;
     note: string;
   }) {
     if (!data.title.trim()) return;
 
     setAdding(true);
-    setLocationNotice(null);
-    setLocationInfo(null);
+    setToast(null);
     const dayFiltered = items.filter((it) => it.day_number === data.dayNumber);
     const maxPosition = dayFiltered.reduce((max, item) => Math.max(max, item.position), 0);
-
-    let coords: { lat: number; lng: number } | null = null;
-    if (data.location.trim()) {
-      const result = await geocodeAddress(data.location.trim());
-      if (result) {
-        coords = { lat: result.lat, lng: result.lng };
-        setLocationInfo(
-          `「${data.title.trim()}」の位置: ${result.label}\n意図と違う場合は、編集から場所を修正してください。`
-        );
-      } else {
-        setLocationNotice(
-          "場所が見つからなかったため、位置情報なしで追加しました(地図には表示されません)。"
-        );
-      }
-    }
 
     const { data: inserted, error: insertError } = await supabase
       .from("timeline_items")
@@ -565,10 +514,11 @@ export default function TripScreen({ tripId }: { tripId: string }) {
         end_time: data.endTime || null,
         title: data.title.trim(),
         note: data.note || null,
-        lat: coords?.lat ?? null,
-        lng: coords?.lng ?? null,
+        lat: data.lat,
+        lng: data.lng,
+        location_text: data.location || null,
       })
-      .select("id, trip_id, day_number, position, start_time, end_time, title, note, lat, lng, travel_mode")
+      .select(TIMELINE_ITEM_COLUMNS)
       .single();
     setAdding(false);
 
@@ -580,6 +530,28 @@ export default function TripScreen({ tripId }: { tripId: string }) {
     applyRealtimeChange("INSERT", inserted as TimelineItem, null);
     if (data.dayNumber !== activeDay) {
       setActiveDay(data.dayNumber);
+    }
+
+    // 候補を選ばずに追加したときは、どこに登録されたか(または見つからなかったこと)を知らせる
+    const id = (inserted as TimelineItem).id;
+    if (data.locationStatus === "auto") {
+      setToast({
+        kind: "info",
+        text: `「${data.title.trim()}」の位置: ${data.locationLabel ?? "検索結果の1件目"}\n意図と違う場合は、編集からピンを直せます。`,
+        itemId: id,
+      });
+    } else if (data.locationStatus === "failed") {
+      setToast({
+        kind: "warn",
+        text: `「${data.location}」が見つからなかったため、位置情報なしで追加しました(地図には出ません)。`,
+        itemId: id,
+      });
+    } else if (data.locationStatus === "error") {
+      setToast({
+        kind: "warn",
+        text: "場所の検索に接続できなかったため、位置情報なしで追加しました。",
+        itemId: id,
+      });
     }
   }
 
@@ -609,6 +581,22 @@ export default function TripScreen({ tripId }: { tripId: string }) {
   async function deleteItem(id: string) {
     await supabase.from("timeline_items").delete().eq("id", id);
     applyRealtimeChange("DELETE", null, { id });
+  }
+
+  /** 日程を変更した後: 旅行情報と予定を取り直して、日タブ・日付表示を最新にする */
+  async function handleDatesSaved(dates: { start_date: string | null; end_date: string | null }) {
+    setTrip((prev) => (prev ? { ...prev, ...dates } : prev));
+    setExtraDays(1);
+    const { data: itemRows } = await supabase
+      .from("timeline_items")
+      .select(TIMELINE_ITEM_COLUMNS)
+      .eq("trip_id", tripId)
+      .order("day_number", { ascending: true })
+      .order("position", { ascending: true });
+    if (itemRows) {
+      setItems(itemRows as TimelineItem[]);
+      setActiveDay(1);
+    }
   }
 
   function handleThemeSaved(colors: ThemeColors) {
@@ -764,6 +752,27 @@ export default function TripScreen({ tripId }: { tripId: string }) {
               className="rounded-lg border border-current/30 px-2.5 py-1 text-xs sm:text-sm opacity-85 transition hover:bg-current/10 cursor-pointer active:scale-95"
             >
               {copied ? "コピーしました！" : `招待: ${trip.invite_code}`}
+            </button>
+            <button
+              onClick={() => {
+                setActiveTab("settings");
+                setTimeout(
+                  () => document.getElementById("dates-section")?.scrollIntoView({ behavior: "smooth" }),
+                  50
+                );
+              }}
+              className="rounded-lg border border-current/30 px-2.5 py-1 text-xs sm:text-sm opacity-85 transition hover:bg-current/10 cursor-pointer active:scale-95"
+              title="日程を変更する"
+            >
+              📅{" "}
+              {trip.start_date
+                ? (() => {
+                    const f = (d: string) => `${parseLocalDate(d).getMonth() + 1}/${parseLocalDate(d).getDate()}`;
+                    return trip.end_date && trip.end_date !== trip.start_date
+                      ? `${f(trip.start_date)} 〜 ${f(trip.end_date)}`
+                      : f(trip.start_date);
+                  })()
+                : "日程未定"}
             </button>
           </div>
         </section>
@@ -949,6 +958,14 @@ export default function TripScreen({ tripId }: { tripId: string }) {
               />
             </div>
             <div className="border-t border-paper-line pt-8">
+              <TripDateEditor
+                key={`${trip.start_date ?? ""}-${trip.end_date ?? ""}`}
+                trip={trip}
+                items={items}
+                onSaved={handleDatesSaved}
+              />
+            </div>
+            <div className="border-t border-paper-line pt-8">
               <TripThemeEditor
                 key={`${trip.header_color ?? ""}-${trip.header_text_color ?? ""}`}
                 trip={trip}
@@ -1109,6 +1126,11 @@ export default function TripScreen({ tripId }: { tripId: string }) {
                           <p className="font-bold text-base sm:text-lg text-ink leading-snug break-words">
                             {item.title}
                           </p>
+                          {item.location_text && (
+                            <p className="mt-1 text-xs sm:text-sm text-ink-text/70 break-words">
+                              📍 {item.location_text}
+                            </p>
+                          )}
                           {item.note && (
                             <p className="mt-1 text-xs sm:text-sm text-ink-text/70 leading-relaxed whitespace-pre-wrap">
                               {item.note}
@@ -1117,6 +1139,7 @@ export default function TripScreen({ tripId }: { tripId: string }) {
                           {item.lat === null && (
                             <p className="mt-1 text-[11px] text-ink-text/40 font-normal">
                               (位置情報なし・地図には表示されません)
+                              {item.location_text ? " 編集から場所を検索し直せます" : ""}
                             </p>
                           )}
                         </div>
@@ -1232,8 +1255,7 @@ export default function TripScreen({ tripId }: { tripId: string }) {
         dayNumbers={dayNumbers}
         onAdd={handleAddModalItem}
         adding={adding}
-        locationNotice={locationNotice}
-        locationInfo={locationInfo}
+        near={nearPoint}
       />
 
       {/* 移動方法選択モーダル / ボトムシート（2枚目画像仕様） */}
@@ -1260,7 +1282,47 @@ export default function TripScreen({ tripId }: { tripId: string }) {
         onSave={(updated) => {
           applyRealtimeChange("UPDATE", updated, null);
         }}
+        near={nearPoint}
       />
+
+      {/* 場所の登録結果のお知らせ(モーダルを閉じたあとも読めるように、画面下に出す) */}
+      {toast && (
+        <div
+          role="status"
+          className="fixed inset-x-3 bottom-[calc(env(safe-area-inset-bottom,0px)+84px)] z-40 mx-auto max-w-md rounded-2xl border border-paper-line bg-white px-4 py-3 shadow-xl md:bottom-6"
+        >
+          <p
+            className={`whitespace-pre-line text-xs sm:text-sm ${
+              toast.kind === "warn" ? "text-amber-dark" : "text-ink-text"
+            }`}
+          >
+            {toast.kind === "warn" ? "⚠️ " : "📍 "}
+            {toast.text}
+          </p>
+          <div className="mt-2 flex items-center justify-end gap-3">
+            {toast.itemId && (
+              <button
+                type="button"
+                onClick={() => {
+                  const target = items.find((it) => it.id === toast.itemId);
+                  if (target) setEditingItem(target);
+                  setToast(null);
+                }}
+                className="text-xs font-semibold text-teal underline cursor-pointer"
+              >
+                場所を直す
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setToast(null)}
+              className="text-xs text-ink-text/60 cursor-pointer"
+            >
+              閉じる
+            </button>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
