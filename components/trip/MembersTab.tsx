@@ -213,7 +213,7 @@ export default function MembersTab({
               {canBan && confirming && (
                 <div className="mt-3 rounded-xl bg-red-50 px-3 py-3">
                   <p className="text-xs text-red-800">
-                    {m.display_name}さんをこの旅行から外し、招待コードを使っても再参加できないようにします。よろしいですか?
+                    {m.display_name}さんをこの外し、招待コードを使っても再参加できないようにします。よろしいですか?
                   </p>
                   <div className="mt-2 flex gap-2">
                     <button

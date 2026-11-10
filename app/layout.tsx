@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Tripchat",
-  description: "計画から精算まで、これひとつで完結する旅のしおり",
+  description: "旅行の計画をこれひとつで完結する旅のしおり",
 };
 
 export const viewport: Viewport = {

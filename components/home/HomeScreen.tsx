@@ -9,11 +9,13 @@ import type { Trip } from "@/types/trip";
 import { resolveTheme } from "@/lib/theme";
 import { countUnreadChat } from "@/lib/unread";
 import Badge from "@/components/trip/Badge";
+import TripCalendar from "./TripCalendar";
+import { parseLocalDate } from "@/lib/trip-utils";
 
 function formatDateRange(start: string | null, end: string | null) {
   if (!start) return "日程未定";
   const fmt = (d: string) => {
-    const date = new Date(d);
+    const date = parseLocalDate(d);
     return `${date.getMonth() + 1}/${date.getDate()}`;
   };
   if (!end || end === start) return fmt(start);
@@ -37,6 +39,26 @@ export default function HomeScreen() {
   // 旅行ごとのチャット未読件数(カードのバッジ用)
   const [unread, setUnread] = useState<Record<string, number>>({});
   const [error, setError] = useState<string | null>(null);
+
+  // 表示モード: list=縦の一覧 / calendar=月カレンダー(選んだ方は端末に覚えておく)
+  const [viewMode, setViewMode] = useState<"list" | "calendar">("list");
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("tripchat:homeView");
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- 保存済みの表示モードを復元するため意図的
+      if (saved === "calendar" || saved === "list") setViewMode(saved);
+    } catch {
+      // 読めなくても一覧表示のまま使える
+    }
+  }, []);
+  function changeViewMode(mode: "list" | "calendar") {
+    setViewMode(mode);
+    try {
+      localStorage.setItem("tripchat:homeView", mode);
+    } catch {
+      // 保存できなくても動作には影響しない
+    }
+  }
 
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newTitle, setNewTitle] = useState("");
@@ -147,65 +169,8 @@ export default function HomeScreen() {
     await loadTrips(userId);
   }
 
-  return (
-    <main className="min-h-screen bg-paper pb-12">
-      <section className="rounded-b-[2rem] sm:rounded-b-[2.5rem] bg-ink px-5 py-8 sm:px-8 sm:py-12 md:px-12 md:py-16 text-paper shadow-xs">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="font-display text-3xl sm:text-4xl md:text-6xl text-amber">
-              Tripchat
-            </h1>
-            <p className="mt-2 sm:mt-3 max-w-md text-sm sm:text-base text-paper/80">
-              計画から精算まで、これひとつで完結する旅のしおり。
-            </p>
-          </div>
-          <Link
-            href="/account"
-            className="shrink-0 rounded-lg border border-paper/30 px-3 py-1.5 sm:px-3.5 sm:py-2 text-xs sm:text-sm text-paper/80 transition hover:bg-paper/10 active:scale-95"
-          >
-            アカウント
-          </Link>
-        </div>
-      </section>
-
-      <section className="mx-auto grid max-w-4xl gap-8 px-4 py-8 sm:gap-10 sm:px-6 md:grid-cols-[1fr_260px] md:px-12 md:py-12">
-        {/* 旅行一覧: 経路のように点線でつなぐ */}
-        <div>
-          <h2 className="font-display text-xl text-ink font-semibold">あなたの旅</h2>
-
-          {error && (
-            <p className="mt-4 text-sm text-red-700">{error}</p>
-          )}
-
-          {loading ? (
-            <p className="mt-6 text-ink-text/60">旅の予定を読み込み中…</p>
-          ) : (
-            <ul className="mt-6 border-l-2 border-dashed border-paper-line pl-5 sm:pl-6">
-              {trips.map((trip) => (
-                <li key={trip.id} className="relative mb-5 sm:mb-6">
-                  <span className="absolute -left-[27px] sm:-left-[29px] top-3 h-3 w-3 rounded-full bg-teal" />
-                  <Link
-                    href={`/trips/${trip.id}`}
-                    className="relative block rounded-2xl border border-paper-line bg-white/70 px-4 py-3.5 sm:px-5 sm:py-4 transition hover:border-teal shadow-2xs active:scale-[0.99]"
-                    style={{ borderLeftWidth: 6, borderLeftColor: resolveTheme(trip).bg }}
-                  >
-                    <Badge count={unread[trip.id] ?? 0} className="absolute right-3.5 top-3.5 sm:right-4 sm:top-4" />
-                    <p className="pr-8 sm:pr-10 font-semibold text-ink-text text-base sm:text-lg">{trip.title}</p>
-                    <p className="mt-1 text-xs sm:text-sm text-ink-text/60">
-                      {formatDateRange(trip.start_date, trip.end_date)}
-                    </p>
-                  </Link>
-                </li>
-              ))}
-
-              {trips.length === 0 && (
-                <li className="mb-6 rounded-xl border border-dashed border-paper-line p-5 text-center text-sm text-ink-text/60">
-                  まだ旅の予定がありません。最初のしおりを作ってみましょう。
-                </li>
-              )}
-
-              <li className="relative">
-                <span className="absolute -left-[27px] sm:-left-[29px] top-3 h-3 w-3 rounded-full border-2 border-amber bg-paper" />
+  const createItem = (
+              <div className="relative">
                 {!showCreateForm ? (
                   <button
                     onClick={() => setShowCreateForm(true)}
@@ -264,6 +229,101 @@ export default function HomeScreen() {
                     </div>
                   </form>
                 )}
+              </div>
+  );
+
+  return (
+    <main className="min-h-screen bg-paper pb-12">
+      <section className="rounded-b-[2rem] sm:rounded-b-[2.5rem] bg-ink px-5 py-8 sm:px-8 sm:py-12 md:px-12 md:py-16 text-paper shadow-xs">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="font-display text-3xl sm:text-4xl md:text-6xl text-amber">
+              Tripchat
+            </h1>
+            <p className="mt-2 sm:mt-3 max-w-md text-sm sm:text-base text-paper/80">
+              旅行の計画をこれひとつで完結する旅のしおり。
+            </p>
+          </div>
+          <Link
+            href="/account"
+            className="shrink-0 rounded-lg border border-paper/30 px-3 py-1.5 sm:px-3.5 sm:py-2 text-xs sm:text-sm text-paper/80 transition hover:bg-paper/10 active:scale-95"
+          >
+            アカウント
+          </Link>
+        </div>
+      </section>
+
+      <section className="mx-auto grid max-w-4xl gap-8 px-4 py-8 sm:gap-10 sm:px-6 md:grid-cols-[1fr_260px] md:px-12 md:py-12">
+        {/* 旅行一覧: 経路のように点線でつなぐ */}
+        <div>
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="font-display text-xl text-ink font-semibold">あなたの旅</h2>
+            <div
+              role="tablist"
+              aria-label="表示の切り替え"
+              className="flex rounded-xl border border-paper-line bg-white/70 p-0.5 text-xs sm:text-sm"
+            >
+              {(
+                [
+                  ["list", "リスト"],
+                  ["calendar", "カレンダー"],
+                ] as const
+              ).map(([mode, label]) => (
+                <button
+                  key={mode}
+                  type="button"
+                  role="tab"
+                  aria-selected={viewMode === mode}
+                  onClick={() => changeViewMode(mode)}
+                  className={`min-h-[36px] rounded-[10px] px-3 font-semibold transition cursor-pointer active:scale-95 ${
+                    viewMode === mode ? "bg-ink text-paper shadow-xs" : "text-ink-text/70"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {error && (
+            <p className="mt-4 text-sm text-red-700">{error}</p>
+          )}
+
+          {loading ? (
+            <p className="mt-6 text-ink-text/60">旅の予定を読み込み中…</p>
+          ) : viewMode === "calendar" ? (
+            <>
+              <TripCalendar trips={trips} />
+              <div className="mt-6">{createItem}</div>
+            </>
+          ) : (
+            <ul className="mt-6 border-l-2 border-dashed border-paper-line pl-5 sm:pl-6">
+              {trips.map((trip) => (
+                <li key={trip.id} className="relative mb-5 sm:mb-6">
+                  <span className="absolute -left-[27px] sm:-left-[29px] top-3 h-3 w-3 rounded-full bg-teal" />
+                  <Link
+                    href={`/trips/${trip.id}`}
+                    className="relative block rounded-2xl border border-paper-line bg-white/70 px-4 py-3.5 sm:px-5 sm:py-4 transition hover:border-teal shadow-2xs active:scale-[0.99]"
+                    style={{ borderLeftWidth: 6, borderLeftColor: resolveTheme(trip).bg }}
+                  >
+                    <Badge count={unread[trip.id] ?? 0} className="absolute right-3.5 top-3.5 sm:right-4 sm:top-4" />
+                    <p className="pr-8 sm:pr-10 font-semibold text-ink-text text-base sm:text-lg">{trip.title}</p>
+                    <p className="mt-1 text-xs sm:text-sm text-ink-text/60">
+                      {formatDateRange(trip.start_date, trip.end_date)}
+                    </p>
+                  </Link>
+                </li>
+              ))}
+
+              {trips.length === 0 && (
+                <li className="mb-6 rounded-xl border border-dashed border-paper-line p-5 text-center text-sm text-ink-text/60">
+                  まだ旅の予定がありません。最初のしおりを作ってみましょう。
+                </li>
+              )}
+
+              <li className="relative">
+                <span className="absolute -left-[27px] sm:-left-[29px] top-3 h-3 w-3 rounded-full border-2 border-amber bg-paper" />
+                {createItem}
               </li>
             </ul>
           )}
