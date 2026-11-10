@@ -8,15 +8,27 @@ import { idToInternalEmail, validateUsername } from "@/lib/auth-utils";
 /**
  * ユーザーID / パスワード / Google の登録・ログインフォーム。
  * /login と /account の両方から利用可能。
+ * ひとつの画面内でログイン・新規登録をスムーズに切り替えて操作できます。
  */
-export default function AuthForms({ redirectPath }: { redirectPath: string }) {
+export default function AuthForms({
+  redirectPath,
+  defaultMode = "login",
+  onGuestLogin,
+  isGuestLoading = false,
+}: {
+  redirectPath: string;
+  defaultMode?: "login" | "register";
+  onGuestLogin?: () => void;
+  isGuestLoading?: boolean;
+}) {
   const supabase = createClient();
   const router = useRouter();
 
-  const [mode, setMode] = useState<"register" | "login">("login");
+  const [mode, setMode] = useState<"register" | "login">(defaultMode);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -97,7 +109,7 @@ export default function AuthForms({ redirectPath }: { redirectPath: string }) {
           signUpError.message.toLowerCase().includes("already exists") ||
           signUpError.message.toLowerCase().includes("user already registered")
         ) {
-          setError("このユーザーIDは既に使われています。「ログイン」タブをお試しください。");
+          setError("このユーザーIDは既に使われています。「ログイン」をお試しください。");
         } else {
           setError("登録できませんでした: " + signUpError.message);
         }
@@ -165,46 +177,54 @@ export default function AuthForms({ redirectPath }: { redirectPath: string }) {
     }
   }
 
+  function toggleMode(newMode: "register" | "login") {
+    setMode(newMode);
+    setError(null);
+    setMessage(null);
+  }
+
   return (
-    <div>
-      <div className="flex gap-2 border-b border-paper-line">
+    <div className="w-full">
+      {/* ログイン / 新規登録のセグメント切り替え（押しやすいピル型UI） */}
+      <div className="relative flex rounded-2xl bg-paper-line/40 p-1.5 shadow-2xs">
         <button
           type="button"
-          onClick={() => {
-            setMode("login");
-            setError(null);
-            setMessage(null);
-          }}
-          className={`-mb-px px-3 py-2 text-sm font-medium ${
-            mode === "login" ? "border-b-2 border-teal text-ink-text" : "text-ink-text/50"
+          onClick={() => toggleMode("login")}
+          className={`flex-1 min-h-[44px] rounded-xl text-sm font-bold transition-all cursor-pointer active:scale-98 flex items-center justify-center gap-1.5 ${
+            mode === "login"
+              ? "bg-white text-ink shadow-sm ring-1 ring-black/5"
+              : "text-ink-text/60 hover:text-ink-text"
           }`}
         >
-          ログイン
+          <span>🔐</span>
+          <span>ログイン</span>
         </button>
         <button
           type="button"
-          onClick={() => {
-            setMode("register");
-            setError(null);
-            setMessage(null);
-          }}
-          className={`-mb-px px-3 py-2 text-sm font-medium ${
-            mode === "register" ? "border-b-2 border-teal text-ink-text" : "text-ink-text/50"
+          onClick={() => toggleMode("register")}
+          className={`flex-1 min-h-[44px] rounded-xl text-sm font-bold transition-all cursor-pointer active:scale-98 flex items-center justify-center gap-1.5 ${
+            mode === "register"
+              ? "bg-white text-ink shadow-sm ring-1 ring-black/5"
+              : "text-ink-text/60 hover:text-ink-text"
           }`}
         >
-          新しく登録
+          <span>✨</span>
+          <span>新規登録</span>
         </button>
       </div>
 
-      <p className="mt-4 text-sm text-ink-text/60">
+      <p className="mt-4 text-xs sm:text-sm text-ink-text/65 leading-relaxed">
         {mode === "register"
-          ? "お好みのユーザーIDとパスワードを設定して登録します。"
-          : "ユーザーIDとパスワードを入力してログインします。"}
+          ? "お好みのユーザーIDとパスワードでアカウントを無料作成します。"
+          : "登録済みのユーザーIDとパスワードを入力してログインします。"}
       </p>
 
-      <form onSubmit={mode === "register" ? handleRegister : handleLogin} className="mt-4 space-y-3">
+      {/* 認証フォーム本体 */}
+      <form onSubmit={mode === "register" ? handleRegister : handleLogin} className="mt-4 space-y-3.5">
         <div>
-          <label className="mb-1 block text-xs font-medium text-ink-text/70">ユーザーID (半角英数字)</label>
+          <label className="mb-1.5 block text-xs font-semibold text-ink-text/80">
+            ユーザーID <span className="text-[11px] font-normal text-ink-text/50">(半角英数字・アンダースコア)</span>
+          </label>
           <input
             type="text"
             required
@@ -213,46 +233,100 @@ export default function AuthForms({ redirectPath }: { redirectPath: string }) {
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             placeholder="例: yamada_123"
-            className="w-full rounded-lg border border-paper-line bg-white px-3 py-2 text-base sm:text-sm text-ink placeholder:text-ink-text/40 focus:border-teal focus:outline-none"
+            className="w-full min-h-[48px] rounded-xl border border-paper-line bg-white px-3.5 py-2.5 text-base sm:text-sm text-ink placeholder:text-ink-text/40 focus:border-teal focus:outline-none shadow-2xs"
           />
         </div>
 
+        {/* 新規登録時のみ表示名入力欄を表示 */}
         {mode === "register" && (
-          <div>
-            <label className="mb-1 block text-xs font-medium text-ink-text/70">表示名 (任意・ニックネーム)</label>
+          <div className="animate-in fade-in duration-200">
+            <label className="mb-1.5 block text-xs font-semibold text-ink-text/80">
+              表示名 <span className="text-[11px] font-normal text-ink-text/50">(ニックネーム・後から変更可能)</span>
+            </label>
             <input
               type="text"
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
               placeholder="例: やまだ"
-              className="w-full rounded-lg border border-paper-line bg-white px-3 py-2 text-base sm:text-sm text-ink placeholder:text-ink-text/40 focus:border-teal focus:outline-none"
+              className="w-full min-h-[48px] rounded-xl border border-paper-line bg-white px-3.5 py-2.5 text-base sm:text-sm text-ink placeholder:text-ink-text/40 focus:border-teal focus:outline-none shadow-2xs"
             />
           </div>
         )}
 
         <div>
-          <label className="mb-1 block text-xs font-medium text-ink-text/70">パスワード (6文字以上)</label>
-          <input
-            type="password"
-            required
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="••••••••"
-            className="w-full rounded-lg border border-paper-line bg-white px-3 py-2 text-base sm:text-sm text-ink placeholder:text-ink-text/40 focus:border-teal focus:outline-none"
-          />
+          <div className="flex items-center justify-between mb-1.5">
+            <label className="block text-xs font-semibold text-ink-text/80">
+              パスワード <span className="text-[11px] font-normal text-ink-text/50">(6文字以上)</span>
+            </label>
+            <button
+              type="button"
+              onClick={() => setShowPassword(!showPassword)}
+              className="text-xs text-ink-text/60 hover:text-ink cursor-pointer"
+            >
+              {showPassword ? "非表示" : "表示する"}
+            </button>
+          </div>
+          <div className="relative">
+            <input
+              type={showPassword ? "text" : "password"}
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••"
+              className="w-full min-h-[48px] rounded-xl border border-paper-line bg-white px-3.5 py-2.5 text-base sm:text-sm text-ink placeholder:text-ink-text/40 focus:border-teal focus:outline-none shadow-2xs pr-10"
+            />
+          </div>
         </div>
 
-        {error && <p className="text-sm text-red-700">{error}</p>}
-        {message && <p className="text-sm text-teal">{message}</p>}
+        {error && (
+          <div className="rounded-xl bg-red-50 border border-red-200 p-3 text-xs sm:text-sm text-red-700 leading-snug">
+            {error}
+          </div>
+        )}
+        {message && (
+          <div className="rounded-xl bg-teal/10 border border-teal/30 p-3 text-xs sm:text-sm text-teal leading-snug">
+            {message}
+          </div>
+        )}
 
-        <button
-          type="submit"
-          disabled={submitting || !username.trim() || !password}
-          className="w-full rounded-lg bg-amber px-4 py-2.5 text-sm font-medium text-ink transition hover:opacity-90 disabled:opacity-50 cursor-pointer shadow-xs active:scale-95"
-        >
-          {submitting ? "処理中…" : mode === "register" ? "アカウントを作成する" : "ログインする"}
-        </button>
+        {/* 送信ボタン（最低48px） */}
+        <div className="pt-1">
+          <button
+            type="submit"
+            disabled={submitting || !username.trim() || !password}
+            className="w-full min-h-[50px] rounded-xl bg-amber px-5 py-3 text-base font-bold text-ink transition hover:opacity-90 disabled:opacity-50 cursor-pointer shadow-sm active:scale-98 flex items-center justify-center"
+          >
+            {submitting ? "処理中…" : mode === "register" ? "アカウントを作成する" : "ログインする"}
+          </button>
+        </div>
       </form>
+
+      {/* 画面内でのワンタップ切り替えリンク */}
+      <div className="mt-4 text-center">
+        {mode === "login" ? (
+          <p className="text-xs sm:text-sm text-ink-text/60">
+            アカウントをお持ちでないですか？{" "}
+            <button
+              type="button"
+              onClick={() => toggleMode("register")}
+              className="font-bold text-teal hover:underline cursor-pointer ml-1 inline-flex items-center min-h-[36px]"
+            >
+              新規登録はこちら
+            </button>
+          </p>
+        ) : (
+          <p className="text-xs sm:text-sm text-ink-text/60">
+            すでにアカウントをお持ちですか？{" "}
+            <button
+              type="button"
+              onClick={() => toggleMode("login")}
+              className="font-bold text-teal hover:underline cursor-pointer ml-1 inline-flex items-center min-h-[36px]"
+            >
+              ログインはこちら
+            </button>
+          </p>
+        )}
+      </div>
 
       <div className="my-5 flex items-center gap-3 text-xs text-ink-text/40">
         <span className="h-px flex-1 bg-paper-line" />
@@ -260,13 +334,14 @@ export default function AuthForms({ redirectPath }: { redirectPath: string }) {
         <span className="h-px flex-1 bg-paper-line" />
       </div>
 
+      {/* Google ログインボタン */}
       <button
         type="button"
         onClick={handleGoogleLogin}
         disabled={submitting}
-        className="flex w-full items-center justify-center gap-2 rounded-lg border border-paper-line bg-white px-4 py-2.5 text-sm font-medium text-ink-text transition hover:bg-paper-line/20 disabled:opacity-50 cursor-pointer active:scale-95 shadow-2xs"
+        className="flex w-full min-h-[48px] items-center justify-center gap-2.5 rounded-xl border border-paper-line bg-white px-4 py-2.5 text-sm font-semibold text-ink-text transition hover:bg-paper-line/20 disabled:opacity-50 cursor-pointer active:scale-98 shadow-2xs"
       >
-        <svg className="h-4 w-4" viewBox="0 0 24 24">
+        <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24">
           <path
             fill="#4285F4"
             d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
@@ -284,13 +359,25 @@ export default function AuthForms({ redirectPath }: { redirectPath: string }) {
             d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
           />
         </svg>
-        {mode === "register" ? "Googleで登録" : "Googleでログイン"}
+        <span>Google でログイン / 登録</span>
       </button>
 
-      {mode === "login" && (
-        <p className="mt-3 text-xs text-ink-text/40">
-          ※ ログインすると、この端末でそれまでゲスト（未登録）で作っていた旅行データは切り替わります。
-        </p>
+      {/* ゲストログイン（登録なしで体験） */}
+      {onGuestLogin && (
+        <div className="mt-3">
+          <button
+            type="button"
+            onClick={onGuestLogin}
+            disabled={submitting || isGuestLoading}
+            className="w-full min-h-[46px] rounded-xl border border-dashed border-paper-line bg-paper/60 hover:bg-white px-4 py-2.5 text-xs sm:text-sm font-medium text-ink-text/75 transition cursor-pointer active:scale-98 flex items-center justify-center gap-1.5"
+          >
+            <span>👤</span>
+            <span>{isGuestLoading ? "ゲストで準備中…" : "登録せずにゲストとして始める"}</span>
+          </button>
+          <p className="mt-1 text-center text-[11px] text-ink-text/45">
+            ※ ゲストで作ったデータは、後からいつでもアカウントに引き継げます。
+          </p>
+        </div>
       )}
     </div>
   );

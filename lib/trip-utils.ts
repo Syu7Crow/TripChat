@@ -9,7 +9,9 @@ export type TravelMode =
   | "taxi"
   | "rental"
   | "car"
-  | "driving";
+  | "driving"
+  | "airplane"
+  | "ferry";
 
 export type TimelineItem = {
   id: string;

@@ -1,7 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { MapContainer, TileLayer, Marker, Polyline, Popup, useMap } from "react-leaflet";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  MapContainer,
+  TileLayer,
+  Marker,
+  Polyline,
+  Popup,
+  useMap,
+  useMapEvents,
+} from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import {
@@ -20,14 +28,30 @@ type Spot = {
   lng: number;
 };
 
-function numberedIcon(index: number) {
+// 背景地図: MapTiler Streets(キーがあるとき) / OpenStreetMap標準(キーが無いとき)
+const MAPTILER_KEY = process.env.NEXT_PUBLIC_MAPTILER_KEY;
+
+const OSM_ATTRIBUTION =
+  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+
+const MAPTILER_ATTRIBUTION =
+  '<a href="https://www.maptiler.com/copyright/" target="_blank" rel="noreferrer">&copy; MapTiler</a> ' +
+  '<a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">&copy; OpenStreetMap contributors</a>';
+
+function numberedIcon(index: number, isSelected?: boolean) {
+  const size = isSelected ? 36 : 28;
+  const bg = isSelected ? "#e69a35" : "#4c9a90";
+  const shadow = isSelected
+    ? "0 0 0 4px rgba(230,154,53,0.35), 0 3px 8px rgba(0,0,0,.4)"
+    : "0 1px 4px rgba(0,0,0,.35)";
+
   return L.divIcon({
     className: "",
-    html: `<div style="background:#4c9a90;color:#fff;width:28px;height:28px;border-radius:9999px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;border:2px solid white;box-shadow:0 2px 6px rgba(0,0,0,.35)">${
+    html: `<div style="background:${bg};color:#fff;width:${size}px;height:${size}px;border-radius:9999px;display:flex;align-items:center;justify-content:center;font-size:${isSelected ? "14px" : "12px"};font-weight:700;border:2.5px solid white;box-shadow:${shadow};transition:all 0.2s ease">${
       index + 1
     }</div>`,
-    iconSize: [28, 28],
-    iconAnchor: [14, 14],
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
   });
 }
 
@@ -51,20 +75,6 @@ function categoryIcon(category: string, iconChar: string) {
   });
 }
 
-function FitBounds({ spots }: { spots: Spot[] }) {
-  const map = useMap();
-  useEffect(() => {
-    if (spots.length === 0) return;
-    if (spots.length === 1) {
-      map.setView([spots[0].lat, spots[0].lng], 15);
-      return;
-    }
-    const bounds = L.latLngBounds(spots.map((s) => [s.lat, s.lng] as [number, number]));
-    map.fitBounds(bounds, { padding: [32, 32] });
-  }, [spots, map]);
-  return null;
-}
-
 function InvalidateSizeOnMount() {
   const map = useMap();
   useEffect(() => {
@@ -74,6 +84,101 @@ function InvalidateSizeOnMount() {
     return () => clearTimeout(timer);
   }, [map]);
   return null;
+}
+
+/**
+ * 地図の表示範囲（中心・ズーム）を制御するコンポーネント。
+ * ユーザーが手動でズームやパン操作をした後は、親の再レンダリングで勝手に元の大きさに戻らないように制御する。
+ */
+function MapController({
+  spots,
+  dayNumber,
+  selectedSpotId,
+}: {
+  spots: Spot[];
+  dayNumber?: number;
+  selectedSpotId?: string | null;
+}) {
+  const map = useMap();
+  // ユーザーが手動で地図を操作したかどうか
+  const userInteractedRef = useRef(false);
+  const prevDayRef = useRef<number | undefined>(dayNumber);
+  const initialFitDoneRef = useRef(false);
+  const prevSpotsCountRef = useRef(spots.length);
+
+  // タイムライン等でスポットが選ばれたときにフォーカス
+  useEffect(() => {
+    if (!selectedSpotId) return;
+    const target = spots.find((s) => s.id === selectedSpotId);
+    if (target) {
+      userInteractedRef.current = true;
+      map.flyTo([target.lat, target.lng], 16, { duration: 0.8 });
+    }
+  }, [selectedSpotId, spots, map]);
+
+  // ユーザーがドラッグまたはズームした時を検知
+  useMapEvents({
+    dragstart: () => {
+      userInteractedRef.current = true;
+    },
+    zoomstart: (e) => {
+      if ("originalEvent" in e && Boolean((e as { originalEvent?: unknown }).originalEvent)) {
+        userInteractedRef.current = true;
+      }
+    },
+  });
+
+  const fitSpots = useCallback(() => {
+    if (spots.length === 0) return;
+    if (spots.length === 1) {
+      map.setView([spots[0].lat, spots[0].lng], 15);
+      return;
+    }
+    const bounds = L.latLngBounds(spots.map((s) => [s.lat, s.lng] as [number, number]));
+    map.fitBounds(bounds, { padding: [40, 40], maxZoom: 16 });
+  }, [spots, map]);
+
+  useEffect(() => {
+    const dayChanged = prevDayRef.current !== dayNumber;
+    if (dayChanged) {
+      prevDayRef.current = dayNumber;
+      // 日付が切り替わった時は新しい日のスポットに合わせて表示をリセット
+      userInteractedRef.current = false;
+    }
+
+    // 初回表示、または日程の切り替え時のみ自動フィットを実行する
+    // （ユーザーが地図を見てるときに親コンポーネントが再レンダリングされても勝手に元の大きさに戻らない）
+    if (!initialFitDoneRef.current || dayChanged) {
+      if (spots.length > 0) {
+        fitSpots();
+        initialFitDoneRef.current = true;
+      }
+    } else if (prevSpotsCountRef.current === 0 && spots.length > 0 && !userInteractedRef.current) {
+      // 0件から最初のスポットが追加された時
+      fitSpots();
+    }
+    prevSpotsCountRef.current = spots.length;
+  }, [dayNumber, spots, fitSpots]);
+
+  return (
+    <>
+      {/* ユーザーが手動で動かした後でも、ワンタップで登録スポット全体に戻せるボタン */}
+      {spots.length > 0 && (
+        <button
+          type="button"
+          onClick={() => {
+            userInteractedRef.current = false;
+            fitSpots();
+          }}
+          title="登録スポット全体を表示"
+          className="absolute bottom-4 right-3 z-[1000] flex items-center gap-1.5 rounded-lg border border-paper-line bg-white/95 backdrop-blur-md px-3 py-1.5 text-xs font-medium text-ink shadow-md transition hover:bg-white active:scale-95 cursor-pointer"
+        >
+          <span>🎯</span>
+          <span>全体を表示</span>
+        </button>
+      )}
+    </>
+  );
 }
 
 /**
@@ -247,10 +352,14 @@ function SearchControlPanel({
 
 export default function MapView({
   spots,
+  dayNumber,
   onAddSpot,
+  selectedSpotId,
 }: {
   spots: Spot[];
+  dayNumber?: number;
   onAddSpot?: (name: string, lat: number, lng: number) => void;
+  selectedSpotId?: string | null;
 }) {
   const [discovered, setDiscovered] = useState<DiscoveredPlace[]>([]);
   const [searching, setSearching] = useState(false);
@@ -274,20 +383,43 @@ export default function MapView({
         style={{ height: "100%", width: "100%" }}
       >
         <InvalidateSizeOnMount />
-        <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        />
 
-        {/* タイムラインに登録済みのスポット（緑の番号ピン） */}
-        {spots.map((spot, index) => (
-          <Marker key={spot.id} position={[spot.lat, spot.lng]} icon={numberedIcon(index)}>
-            <Popup>
-              <p className="font-semibold text-sm text-ink">{spot.title}</p>
-              <p className="text-xs text-teal font-medium mt-0.5">登録済みの予定 ({index + 1}番目)</p>
-            </Popup>
-          </Marker>
-        ))}
+        {MAPTILER_KEY ? (
+          // 512pxタイル + zoomOffset=-1 は、MapTiler公式のLeaflet用の指定(ズーム段階は従来と同じ)
+          <TileLayer
+            attribution={MAPTILER_ATTRIBUTION}
+            url={`https://api.maptiler.com/maps/streets-v4/{z}/{x}/{y}.png?key=${MAPTILER_KEY}`}
+            tileSize={512}
+            zoomOffset={-1}
+            minZoom={1}
+            crossOrigin={true}
+          />
+        ) : (
+          <TileLayer
+            attribution={OSM_ATTRIBUTION}
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          />
+        )}
+
+        {/* タイムラインに登録済みのスポット（緑の番号ピン・選択時はハイライト） */}
+        {spots.map((spot, index) => {
+          const isSelected = spot.id === selectedSpotId;
+          return (
+            <Marker
+              key={spot.id}
+              position={[spot.lat, spot.lng]}
+              icon={numberedIcon(index, isSelected)}
+              zIndexOffset={isSelected ? 1000 : 0}
+            >
+              <Popup>
+                <p className="font-semibold text-sm text-ink">{spot.title}</p>
+                <p className="text-xs text-teal font-medium mt-0.5">
+                  登録済みの予定 ({index + 1}番目)
+                </p>
+              </Popup>
+            </Marker>
+          );
+        })}
 
         {/* スポット同士を結ぶルート線 */}
         {spots.length > 1 && (
@@ -333,7 +465,12 @@ export default function MapView({
           );
         })}
 
-        <FitBounds spots={spots} />
+        {/* スポット全体表示コントローラー（手動操作後は勝手にリセットされない） */}
+        <MapController
+          spots={spots}
+          dayNumber={dayNumber}
+          selectedSpotId={selectedSpotId}
+        />
 
         {/* 検索パネル（入力欄 ＋ カフェ・ホテル・旅館などのカテゴリボタン） */}
         {onAddSpot && (
@@ -346,6 +483,24 @@ export default function MapView({
           />
         )}
       </MapContainer>
+
+      {/* MapTiler利用規約に基づくロゴ表示 */}
+      {MAPTILER_KEY && (
+        <a
+          href="https://www.maptiler.com"
+          target="_blank"
+          rel="noreferrer"
+          aria-label="MapTiler"
+          style={{ position: "absolute", left: 10, bottom: 8, zIndex: 1000 }}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element -- 外部ロゴ(表示必須)のため素のimgで表示 */}
+          <img
+            src="https://api.maptiler.com/resources/logo.svg"
+            alt="MapTiler logo"
+            style={{ height: 20, width: "auto" }}
+          />
+        </a>
+      )}
     </div>
   );
 }

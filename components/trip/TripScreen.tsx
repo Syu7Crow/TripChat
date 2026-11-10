@@ -33,14 +33,130 @@ import { countUnreadChat, markChatRead } from "@/lib/unread";
 import Avatar from "./Avatar";
 import Badge from "./Badge";
 import EditTimelineModal from "./EditTimelineModal";
+import AddTimelineModal from "./AddTimelineModal";
+import TravelModeModal from "./TravelModeModal";
+
+function TravelModeIcon({ mode, className = "h-4 w-4" }: { mode: TravelMode; className?: string }) {
+  switch (mode) {
+    case "walking":
+      return <span className="text-base leading-none">👣</span>;
+    case "transit":
+      return (
+        <svg className={`${className} text-teal`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M8 3h8a2 2 0 012 2v11a2 2 0 01-2 2H8a2 2 0 01-2-2V5a2 2 0 012-2zM8 7h8M8 11h8M9 18l-2 3M15 18l2 3" />
+        </svg>
+      );
+    case "bus":
+      return <span className="text-base leading-none">🚌</span>;
+    case "taxi":
+      return <span className="text-base leading-none">🚕</span>;
+    case "car":
+    case "driving":
+    case "rental":
+      return <span className="text-base leading-none">🚗</span>;
+    case "airplane":
+      return <span className="text-base leading-none">✈️</span>;
+    case "ferry":
+      return <span className="text-base leading-none">⛴️</span>;
+    default:
+      return (
+        <svg className={`${className} text-teal`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M8 3h8a2 2 0 012 2v11a2 2 0 01-2 2H8a2 2 0 01-2-2V5a2 2 0 012-2zM8 7h8M8 11h8M9 18l-2 3M15 18l2 3" />
+        </svg>
+      );
+  }
+}
+
+function getModeLabel(mode: TravelMode): string {
+  switch (mode) {
+    case "walking":
+      return "徒歩";
+    case "transit":
+      return "電車";
+    case "bus":
+      return "バス";
+    case "taxi":
+      return "タクシー";
+    case "car":
+    case "driving":
+      return "自動車";
+    case "rental":
+      return "レンタカー";
+    case "airplane":
+      return "飛行機";
+    case "ferry":
+      return "フェリー";
+    default:
+      return "移動";
+  }
+}
+
+/** 1枚目の画像デザインに準拠した移動セクションカード */
+function TravelSegmentCard({
+  fromTitle,
+  toTitle,
+  mode,
+  estimate,
+  onClickChange,
+}: {
+  fromTitle: string;
+  toTitle: string;
+  mode: TravelMode;
+  estimate: TravelEstimate | null;
+  onClickChange: () => void;
+}) {
+  return (
+    <div className="my-2.5 rounded-2xl border border-paper-line/80 bg-white p-3.5 sm:p-4 shadow-2xs transition hover:shadow-xs">
+      {/* 上部: アイコン + 移動、右上に所要時間 */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5 text-teal font-bold text-sm">
+          <TravelModeIcon mode={mode} className="h-4 w-4" />
+          <span className="text-sm font-bold text-ink">移動</span>
+        </div>
+        <span className="text-xs sm:text-sm font-bold text-ink-text/80">
+          {estimate ? formatDuration(estimate.minutes) : "--分"}
+        </span>
+      </div>
+
+      {/* 中央: 出発地 → 目的地 */}
+      <div className="mt-2">
+        <p className="font-bold text-sm sm:text-base text-ink leading-snug">
+          {fromTitle} → {toTitle}
+        </p>
+        <div className="mt-1 flex items-center justify-between">
+          <p className="text-xs text-ink-text/65 font-medium">
+            {getModeLabel(mode)}・約{estimate ? estimate.fareYen.toLocaleString() : "0"}円
+          </p>
+          <span className="rounded-full bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[11px] font-bold text-emerald-700">
+            {estimate?.basis.includes("実データ") || estimate?.basis.includes("駅") ? "実データ" : "推計"}
+          </span>
+        </div>
+      </div>
+
+      {/* 下部: 経路を確認・変更 › */}
+      <div className="mt-2.5 pt-2 border-t border-paper-line/40">
+        <button
+          type="button"
+          onClick={onClickChange}
+          className="inline-flex items-center gap-1 text-xs font-bold text-teal transition hover:opacity-80 cursor-pointer min-h-[36px] py-1"
+        >
+          <span>経路を確認・変更</span>
+          <span className="text-sm leading-none">›</span>
+        </button>
+      </div>
+    </div>
+  );
+}
 
 // 画面に出す移動手段(旧データの "driving" は normalizeMode でタクシー/自家用車に読み替える)
 const TRAVEL_MODES: Array<{ key: Exclude<TravelMode, "driving">; label: string }> = [
   { key: "walking", label: "徒歩" },
-  { key: "bus", label: "バス" },
   { key: "transit", label: "電車" },
+  { key: "bus", label: "バス" },
   { key: "taxi", label: "タクシー" },
   { key: "car", label: "自動車" },
+  { key: "airplane", label: "飛行機" },
+  { key: "ferry", label: "フェリー" },
 ];
 
 type Member = TripMember;
@@ -58,6 +174,13 @@ export default function TripScreen({ tripId }: { tripId: string }) {
     "timeline"
   );
   const [editingItem, setEditingItem] = useState<TimelineItem | null>(null);
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [selectedTravelSegment, setSelectedTravelSegment] = useState<{
+    fromItem: TimelineItem;
+    toItem: TimelineItem;
+    currentMode: TravelMode;
+  } | null>(null);
+  const [selectedSpotId, setSelectedSpotId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -401,6 +524,65 @@ export default function TripScreen({ tripId }: { tripId: string }) {
     setNewLocation("");
   }
 
+  async function handleAddModalItem(data: {
+    title: string;
+    dayNumber: number;
+    startTime: string;
+    endTime: string;
+    location: string;
+    note: string;
+  }) {
+    if (!data.title.trim()) return;
+
+    setAdding(true);
+    setLocationNotice(null);
+    setLocationInfo(null);
+    const dayFiltered = items.filter((it) => it.day_number === data.dayNumber);
+    const maxPosition = dayFiltered.reduce((max, item) => Math.max(max, item.position), 0);
+
+    let coords: { lat: number; lng: number } | null = null;
+    if (data.location.trim()) {
+      const result = await geocodeAddress(data.location.trim());
+      if (result) {
+        coords = { lat: result.lat, lng: result.lng };
+        setLocationInfo(
+          `「${data.title.trim()}」の位置: ${result.label}\n意図と違う場合は、編集から場所を修正してください。`
+        );
+      } else {
+        setLocationNotice(
+          "場所が見つからなかったため、位置情報なしで追加しました(地図には表示されません)。"
+        );
+      }
+    }
+
+    const { data: inserted, error: insertError } = await supabase
+      .from("timeline_items")
+      .insert({
+        trip_id: tripId,
+        day_number: data.dayNumber,
+        position: maxPosition + 1000,
+        start_time: data.startTime || null,
+        end_time: data.endTime || null,
+        title: data.title.trim(),
+        note: data.note || null,
+        lat: coords?.lat ?? null,
+        lng: coords?.lng ?? null,
+      })
+      .select("id, trip_id, day_number, position, start_time, end_time, title, note, lat, lng, travel_mode")
+      .single();
+    setAdding(false);
+
+    if (insertError || !inserted) {
+      setError("予定を追加できませんでした。時間をおいて試してください。");
+      return;
+    }
+
+    applyRealtimeChange("INSERT", inserted as TimelineItem, null);
+    if (data.dayNumber !== activeDay) {
+      setActiveDay(data.dayNumber);
+    }
+  }
+
   async function changeTravelMode(item: TimelineItem, mode: TravelMode) {
     applyRealtimeChange("UPDATE", { ...item, travel_mode: mode }, null);
     await supabase.from("timeline_items").update({ travel_mode: mode }).eq("id", item.id);
@@ -688,8 +870,8 @@ export default function TripScreen({ tripId }: { tripId: string }) {
           })}
         </nav>
 
-        {/* スマホ用ボトムナビゲーションバー: アイコン付き、タップしやすいUI */}
-        <nav className="fixed inset-x-0 bottom-0 z-30 flex items-center justify-around border-t border-paper-line bg-paper/95 backdrop-blur-md px-1 pt-1 pb-[calc(env(safe-area-inset-bottom,0px)+6px)] shadow-[0_-2px_12px_rgba(0,0,0,0.06)] md:hidden">
+        {/* スマホ用ボトムナビゲーションバー: 画面下部固定、最低48pxのタップ領域を確保 */}
+        <nav className="fixed inset-x-0 bottom-0 z-30 flex items-center justify-around border-t border-paper-line bg-paper/95 backdrop-blur-md px-1 pt-1.5 pb-[calc(env(safe-area-inset-bottom,0px)+6px)] shadow-[0_-2px_12px_rgba(0,0,0,0.06)] md:hidden">
           {TABS.map((tab) => {
             const Icon = TAB_ICONS[tab.key];
             const isActive = activeTab === tab.key;
@@ -697,8 +879,8 @@ export default function TripScreen({ tripId }: { tripId: string }) {
               <button
                 key={tab.key}
                 onClick={() => setActiveTab(tab.key)}
-                className={`relative flex flex-1 flex-col items-center justify-center py-1 transition-colors cursor-pointer active:scale-95 ${
-                  isActive ? "text-teal font-medium" : "text-ink-text/45 hover:text-ink-text"
+                className={`relative flex flex-1 min-h-[48px] flex-col items-center justify-center py-1 transition-colors cursor-pointer active:scale-95 ${
+                  isActive ? "text-teal font-bold" : "text-ink-text/50 hover:text-ink-text"
                 }`}
               >
                 <div className="relative">
@@ -709,7 +891,7 @@ export default function TripScreen({ tripId }: { tripId: string }) {
                     </span>
                   ) : null}
                 </div>
-                <span className="mt-0.5 text-[10px] tracking-tight">{tab.label}</span>
+                <span className="mt-1 text-[11px] tracking-tight">{tab.label}</span>
               </button>
             );
           })}
@@ -737,6 +919,7 @@ export default function TripScreen({ tripId }: { tripId: string }) {
               onSelectDay={setActiveDay}
               dayItems={dayItems}
               onAddSpot={handleQuickAddSpot}
+              selectedSpotId={selectedSpotId}
             />
           </div>
         )}
@@ -779,283 +962,296 @@ export default function TripScreen({ tripId }: { tripId: string }) {
         )}
 
         {activeTab === "timeline" && (
-          <>
-            {/* 日程タブ: スマホでは横スワイプ可能 */}
-            <div className="mt-4 sm:mt-6 flex items-center gap-2 overflow-x-auto no-scrollbar pb-1.5 -mx-3.5 px-3.5 sm:mx-0 sm:px-0 sm:flex-wrap">
-              {dayNumbers.map((day) => (
-                <button
-                  key={day}
-                  onClick={() => setActiveDay(day)}
-                  className={`shrink-0 rounded-full px-3.5 py-1.5 text-xs sm:text-sm font-medium transition cursor-pointer ${
-                    activeDay === day ? "shadow-xs" : "border border-paper-line bg-white/70 text-ink-text hover:bg-white"
-                  }`}
-                  style={
-                    activeDay === day ? { backgroundColor: theme.bg, color: theme.sub } : undefined
-                  }
-                >
-                  {formatDayLabel(trip, day)}
-                </button>
-              ))}
-              {!trip.start_date && (
-                <button
-                  onClick={() => {
-                    const next = Math.max(...dayNumbers) + 1;
-                    setExtraDays(next);
-                    setActiveDay(next);
-                  }}
-                  className="shrink-0 rounded-full border border-dashed border-amber px-3 py-1.5 text-xs sm:text-sm font-medium text-amber-dark hover:bg-amber/10 cursor-pointer"
-                >
-                  + 日を追加
-                </button>
-              )}
-            </div>
+          <div className="w-full max-w-4xl mx-auto pb-24 md:pb-12 pt-2">
+            {/* 日程タブ: スマホでは横スクロール（最低44pxのタップ領域） */}
+            <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-1.5 -mx-3.5 px-3.5 sm:mx-0 sm:px-0">
+                {dayNumbers.map((day) => (
+                  <button
+                    key={day}
+                    onClick={() => setActiveDay(day)}
+                    className={`min-h-[44px] shrink-0 rounded-full px-4 py-2 text-xs sm:text-sm font-semibold transition cursor-pointer active:scale-95 ${
+                      activeDay === day
+                        ? "shadow-sm"
+                        : "border border-paper-line bg-white/80 text-ink-text/80 hover:bg-white"
+                    }`}
+                    style={
+                      activeDay === day
+                        ? { backgroundColor: theme.bg, color: theme.sub }
+                        : undefined
+                    }
+                  >
+                    {formatDayLabel(trip, day)}
+                  </button>
+                ))}
+                {!trip.start_date && (
+                  <button
+                    onClick={() => {
+                      const next = Math.max(...dayNumbers) + 1;
+                      setExtraDays(next);
+                      setActiveDay(next);
+                    }}
+                    className="min-h-[44px] shrink-0 rounded-full border border-dashed border-amber px-3.5 py-2 text-xs sm:text-sm font-semibold text-amber-dark hover:bg-amber/10 cursor-pointer active:scale-95"
+                  >
+                    + 日を追加
+                  </button>
+                )}
+              </div>
 
-            {/* タイムライン項目 */}
-            <ul className="mt-5 space-y-3">
-              {dayItems.map((item, index) => {
-                const prev = index > 0 ? dayItems[index - 1] : null;
-                const hasRoute = prev && prev.lat !== null && prev.lng !== null && item.lat !== null && item.lng !== null;
-                const distanceKm = hasRoute
-                  ? haversineDistanceKm({ lat: prev!.lat as number, lng: prev!.lng as number }, { lat: item.lat as number, lng: item.lng as number })
-                  : null;
-
-                // 電車は「最寄り駅があり、出発地と目的地で駅が別々」のときだけ使える
-                const transitPlan =
-                  hasRoute && distanceKm !== null
-                    ? planTransit(
-                        stations[stationKey(prev!.lat as number, prev!.lng as number)],
-                        stations[stationKey(item.lat as number, item.lng as number)],
-                        distanceKm
+              {/* タイムライン項目（縦1列・全幅表示） */}
+              <ul className="mt-3 space-y-2.5">
+                {dayItems.map((item, index) => {
+                  const prev = index > 0 ? dayItems[index - 1] : null;
+                  const hasRoute =
+                    prev &&
+                    prev.lat !== null &&
+                    prev.lng !== null &&
+                    item.lat !== null &&
+                    item.lng !== null;
+                  const distanceKm = hasRoute
+                    ? haversineDistanceKm(
+                        { lat: prev!.lat as number, lng: prev!.lng as number },
+                        { lat: item.lat as number, lng: item.lng as number }
                       )
                     : null;
-                // 通信エラーのときは「使えない」と決めつけず、再試行できるようにする
-                const transitUnavailable =
-                  transitPlan?.status === "unavailable" && transitPlan.kind !== "error";
 
-                // 選ばれた手段: 利用者が選んだものを最優先。未選択のときだけ距離などから自動で提案する
-                // (遠距離は海を渡る場合などで車が現実的でないため、自動では車にしない)
-                let mode: TravelMode | null = null;
-                if (distanceKm !== null) {
-                  const saved = item.travel_mode ? normalizeMode(item.travel_mode, distanceKm) : null;
-                  mode = saved ?? (distanceKm <= 1.2 ? "walking" : "transit");
-                  if (mode === "transit" && transitUnavailable) {
-                    if (distanceKm <= 2.5) mode = "walking";
-                    else if (distanceKm <= 150) mode = normalizeMode("driving", distanceKm);
-                  }
-                }
+                  const transitPlan =
+                    hasRoute && distanceKm !== null
+                      ? planTransit(
+                          stations[stationKey(prev!.lat as number, prev!.lng as number)],
+                          stations[stationKey(item.lat as number, item.lng as number)],
+                          distanceKm
+                        )
+                      : null;
 
-                let estimate: TravelEstimate | null = null;
-                let transitDetail: string | null = null;
-                if (distanceKm !== null && mode) {
-                  if (mode === "transit") {
-                    if (transitPlan?.status === "ok") {
-                      estimate = transitPlan.estimate;
-                      transitDetail = transitPlan.detail;
+                  let mode: TravelMode = item.travel_mode
+                    ? normalizeMode(item.travel_mode, distanceKm ?? 10)
+                    : distanceKm !== null && distanceKm <= 1.2
+                    ? "walking"
+                    : "transit";
+
+                  let estimate: TravelEstimate | null = null;
+                  if (distanceKm !== null && mode) {
+                    if (mode === "transit") {
+                      if (transitPlan?.status === "ok") {
+                        estimate = transitPlan.estimate;
+                      } else {
+                        estimate = estimateTravel(distanceKm, "transit");
+                      }
+                    } else {
+                      estimate = estimateTravel(distanceKm, mode);
                     }
-                  } else {
-                    estimate = estimateTravel(distanceKm, mode);
                   }
-                }
 
-                return (
-                  <li key={item.id}>
-                    {hasRoute && mode && (
-                      <div className="mb-2 pl-1.5 sm:pl-2 text-xs text-ink-text/65">
-                        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-                          <span className="text-[11px] font-medium text-ink-text/50">前の予定から</span>
-                          <div className="flex flex-wrap gap-1">
-                            {TRAVEL_MODES.map(({ key: m, label }) => {
-                              const disabled = m === "transit" && transitUnavailable;
-                              return (
-                                <button
-                                  key={m}
-                                  onClick={() => changeTravelMode(item, m)}
-                                  disabled={disabled}
-                                  title={disabled && transitPlan?.status === "unavailable" ? transitPlan.reason : undefined}
-                                  className={`rounded-full px-2.5 py-0.5 text-xs font-medium transition cursor-pointer ${
-                                    mode === m ? "bg-teal text-white shadow-xs" : "border border-paper-line bg-white/70 hover:bg-white"
-                                  } ${disabled ? "cursor-not-allowed opacity-40 line-through" : ""}`}
-                                >
-                                  {label}
-                                </button>
-                              );
-                            })}
-                          </div>
-                          {estimate ? (
-                            <span className="text-[11px] sm:text-xs">
-                              約{formatDuration(estimate.minutes)}・約
-                              {estimate.distanceKm < 10
-                                ? estimate.distanceKm.toFixed(1)
-                                : Math.round(estimate.distanceKm).toLocaleString()}
-                              km・概算¥{estimate.fareYen.toLocaleString()}
-                              <span className="text-ink-text/40">({estimate.basis})</span>
-                            </span>
-                          ) : transitPlan?.status === "pending" ? (
-                            <span className="text-[11px] text-ink-text/40">最寄り駅を確認中…</span>
-                          ) : null}
+                  const isSelected = selectedSpotId === item.id;
+
+                  return (
+                    <li key={item.id} className="w-full">
+                      {/* 1枚目画像の移動カード仕様 */}
+                      {hasRoute && mode && (
+                        <TravelSegmentCard
+                          fromTitle={prev!.title}
+                          toTitle={item.title}
+                          mode={mode}
+                          estimate={estimate}
+                          onClickChange={() =>
+                            setSelectedTravelSegment({
+                              fromItem: prev!,
+                              toItem: item,
+                              currentMode: mode,
+                            })
+                          }
+                        />
+                      )}
+
+                      {/* 予定カード（全幅表示） */}
+                      <div
+                        className={`w-full flex items-start gap-3 rounded-2xl border bg-white p-3.5 sm:p-4 transition cursor-pointer shadow-2xs hover:shadow-xs active:scale-[0.99] ${
+                          isSelected
+                            ? "border-teal ring-2 ring-teal/30 bg-teal/5"
+                            : "border-paper-line/80 hover:border-paper-line"
+                        }`}
+                        onClick={() => {
+                          setSelectedSpotId(item.id);
+                        }}
+                      >
+                        {/* 時間列 */}
+                        <div
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingItem(item);
+                          }}
+                          className="w-14 sm:w-16 shrink-0 pt-0.5 text-xs sm:text-sm font-bold text-ink-text/80 cursor-pointer"
+                          title="クリックして時間を編集"
+                        >
+                          {item.start_time && (
+                            <div className="text-sm font-bold text-ink">
+                              {item.start_time.slice(0, 5)}
+                            </div>
+                          )}
+                          {item.end_time && (
+                            <div className="text-xs text-ink-text/50">
+                              〜{item.end_time.slice(0, 5)}
+                            </div>
+                          )}
+                          {!item.start_time && !item.end_time && (
+                            <div className="text-xs text-ink-text/40 font-normal">時間未定</div>
+                          )}
                         </div>
-                        {transitDetail && <p className="mt-0.5 text-[11px] text-ink-text/50">{transitDetail}</p>}
-                        {mode === "transit" && transitPlan?.status === "ok" && transitPlan.walkingFaster && (
-                          <p className="mt-0.5 text-[11px] text-amber-dark">{transitPlan.walkingFaster}</p>
-                        )}
-                        {transitPlan?.status === "unavailable" &&
-                          mode === "transit" && (
-                            <p className="mt-0.5 text-[11px] text-amber-dark">
-                              {transitPlan.reason}
-                              {transitPlan.kind === "error" && (
-                                <button onClick={retryStations} className="ml-2 underline cursor-pointer">
-                                  再試行
-                                </button>
-                              )}
+
+                        {/* 本文（タイトル・メモ） */}
+                        <div
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingItem(item);
+                          }}
+                          className="min-w-0 flex-1 cursor-pointer"
+                        >
+                          <p className="font-bold text-base sm:text-lg text-ink leading-snug break-words">
+                            {item.title}
+                          </p>
+                          {item.note && (
+                            <p className="mt-1 text-xs sm:text-sm text-ink-text/70 leading-relaxed whitespace-pre-wrap">
+                              {item.note}
                             </p>
                           )}
-                      </div>
-                    )}
-                    <div className="flex items-start gap-2.5 sm:gap-3 rounded-2xl border border-paper-line bg-white/70 p-3 sm:px-4 sm:py-3.5 shadow-xs transition hover:border-paper-line/90">
-                      <div
-                        onClick={() => setEditingItem(item)}
-                        className="w-13 sm:w-16 shrink-0 pt-0.5 text-xs sm:text-sm font-medium text-ink-text/70 cursor-pointer"
-                        title="クリックして予定を編集"
-                      >
-                        {item.start_time && <div>{item.start_time.slice(0, 5)}</div>}
-                        {item.end_time && (
-                          <div className="text-[11px] text-ink-text/45">〜{item.end_time.slice(0, 5)}</div>
-                        )}
-                        {!item.start_time && !item.end_time && (
-                          <div className="text-[11px] text-ink-text/30">時間未定</div>
-                        )}
-                      </div>
-                      <div
-                        onClick={() => setEditingItem(item)}
-                        className="min-w-0 flex-1 cursor-pointer group"
-                        title="クリックして予定を編集"
-                      >
-                        <p className="font-medium text-sm sm:text-base text-ink-text leading-snug break-words group-hover:text-teal transition-colors">
-                          {item.title}
-                        </p>
-                        {item.note && (
-                          <p className="mt-0.5 text-xs sm:text-sm text-ink-text/60 leading-relaxed whitespace-pre-wrap">
-                            {item.note}
-                          </p>
-                        )}
-                        {item.lat === null && (
-                          <p className="mt-0.5 text-[11px] text-ink-text/40">(位置情報なし・地図には表示されません)</p>
-                        )}
-                      </div>
-                      <div className="flex shrink-0 items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => setEditingItem(item)}
-                          className="flex h-7 w-7 items-center justify-center rounded-lg text-ink-text/45 transition hover:bg-paper-line/50 hover:text-ink cursor-pointer"
-                          aria-label="編集"
-                          title="予定を編集"
+                          {item.lat === null && (
+                            <p className="mt-1 text-[11px] text-ink-text/40 font-normal">
+                              (位置情報なし・地図には表示されません)
+                            </p>
+                          )}
+                        </div>
+
+                        {/* アクションボタン群（最低44pxのタップ領域） */}
+                        <div
+                          className="flex shrink-0 items-center gap-1"
+                          onClick={(e) => e.stopPropagation()}
                         >
-                          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
-                          </svg>
-                        </button>
-                        <div className="flex flex-col">
+                          {/* 地図連携ボタン */}
+                          {item.lat !== null && item.lng !== null && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedSpotId(item.id);
+                                setActiveTab("map");
+                              }}
+                              className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl text-teal hover:bg-teal/10 transition cursor-pointer"
+                              title="地図で位置を確認"
+                              aria-label="地図で確認"
+                            >
+                              <span className="text-base">📍</span>
+                            </button>
+                          )}
+
+                          {/* 編集ボタン */}
+                        
+                          {/* 順序入れ替えボタン */}
+                          <div className="flex flex-col">
+                            <button
+                              onClick={() => moveItem(item, "up")}
+                              disabled={index === 0}
+                              className="flex h-5 w-6 items-center justify-center rounded text-xs text-ink-text/50 hover:bg-paper-line/50 disabled:opacity-20 cursor-pointer"
+                              aria-label="上へ"
+                            >
+                              ▲
+                            </button>
+                            <button
+                              onClick={() => moveItem(item, "down")}
+                              disabled={index === dayItems.length - 1}
+                              className="flex h-5 w-6 items-center justify-center rounded text-xs text-ink-text/50 hover:bg-paper-line/50 disabled:opacity-20 cursor-pointer"
+                              aria-label="下へ"
+                            >
+                              ▼
+                            </button>
+                          </div>
+
+                          {/* 削除ボタン */}
                           <button
-                            onClick={() => moveItem(item, "up")}
-                            disabled={index === 0}
-                            className="flex h-6 w-6 items-center justify-center rounded text-xs text-ink-text/50 hover:bg-paper-line/40 disabled:opacity-20 cursor-pointer"
-                            aria-label="上へ"
+                            onClick={() => deleteItem(item.id)}
+                            className="min-h-[44px] min-w-[36px] flex items-center justify-center rounded-xl text-lg text-ink-text/40 transition hover:bg-red-50 hover:text-red-700 cursor-pointer"
+                            aria-label="削除"
                           >
-                            ▲
-                          </button>
-                          <button
-                            onClick={() => moveItem(item, "down")}
-                            disabled={index === dayItems.length - 1}
-                            className="flex h-6 w-6 items-center justify-center rounded text-xs text-ink-text/50 hover:bg-paper-line/40 disabled:opacity-20 cursor-pointer"
-                            aria-label="下へ"
-                          >
-                            ▼
+                            ×
                           </button>
                         </div>
-                        <button
-                          onClick={() => deleteItem(item.id)}
-                          className="flex h-7 w-7 items-center justify-center rounded-lg text-base text-ink-text/40 transition hover:bg-red-50 hover:text-red-700 cursor-pointer"
-                          aria-label="削除"
-                        >
-                          ×
-                        </button>
                       </div>
-                    </div>
+                    </li>
+                  );
+                })}
+
+                {dayItems.length === 0 && (
+                  <li className="rounded-2xl border border-dashed border-paper-line p-8 text-center text-sm text-ink-text/60 bg-white/40">
+                    <p className="text-base font-semibold text-ink">予定がまだありません</p>
+                    <p className="mt-1 text-xs text-ink-text/60">
+                      下の「＋ 予定を追加」ボタンから予定を登録しましょう。
+                    </p>
                   </li>
-                );
-              })}
+                )}
+              </ul>
 
-              {dayItems.length === 0 && (
-                <li className="rounded-xl border border-dashed border-paper-line p-6 text-center text-sm text-ink-text/60">
-                  この日の予定はまだありません。下のフォームから予定を追加してみましょう。
-                </li>
-              )}
-            </ul>
-
-            {/* 追加フォーム */}
-            <form
-              onSubmit={handleAddItem}
-              className="mt-6 rounded-2xl border border-dashed border-paper-line bg-white/40 p-4 sm:p-5"
-            >
-              <p className="text-xs font-semibold text-ink-text/70 mb-2">新しい予定を追加</p>
-              <input
-                value={newTitle}
-                onChange={(e) => setNewTitle(e.target.value)}
-                placeholder="予定名 (例: 浅草寺を観光)"
-                className="w-full rounded-lg border border-paper-line bg-white px-3 py-2 text-sm text-ink placeholder:text-ink-text/40 focus:border-teal focus:outline-none"
-              />
-              <div className="mt-2 grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-[11px] font-medium text-ink-text/60">開始時間</label>
-                  <input
-                    type="time"
-                    value={newStart}
-                    onChange={(e) => setNewStart(e.target.value)}
-                    className="mt-0.5 w-full rounded-lg border border-paper-line bg-white px-2.5 py-1.5 text-sm text-ink focus:border-teal focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="text-[11px] font-medium text-ink-text/60">終了時間</label>
-                  <input
-                    type="time"
-                    value={newEnd}
-                    onChange={(e) => setNewEnd(e.target.value)}
-                    className="mt-0.5 w-full rounded-lg border border-paper-line bg-white px-2.5 py-1.5 text-sm text-ink focus:border-teal focus:outline-none"
-                  />
-                </div>
+              {/* タイムライン下部の＋ボタン（最初の画面表示はフォームではなく＋だけ） */}
+              <div className="mt-5">
+                <button
+                  type="button"
+                  onClick={() => setIsAddModalOpen(true)}
+                  className="w-full min-h-[48px] rounded-2xl border-2 border-dashed border-paper-line/80 bg-white/70 hover:bg-white hover:border-amber py-3 px-4 text-sm font-bold text-ink-text/80 transition flex items-center justify-center gap-2 cursor-pointer active:scale-98 shadow-2xs"
+                >
+                  <span className="text-lg leading-none text-amber-dark">＋</span>
+                  <span>新しい予定を追加</span>
+                </button>
               </div>
-              <input
-                value={newLocation}
-                onChange={(e) => setNewLocation(e.target.value)}
-                placeholder="場所 (住所やスポット名、任意・地図/移動時間に使われます)"
-                className="mt-2 w-full rounded-lg border border-paper-line bg-white px-3 py-2 text-sm text-ink placeholder:text-ink-text/40 focus:border-teal focus:outline-none"
-              />
-              <input
-                value={newNote}
-                onChange={(e) => setNewNote(e.target.value)}
-                placeholder="メモ (任意)"
-                className="mt-2 w-full rounded-lg border border-paper-line bg-white px-3 py-2 text-sm text-ink placeholder:text-ink-text/40 focus:border-teal focus:outline-none"
-              />
-              {locationNotice && (
-                <p className="mt-2 text-xs text-amber-dark">{locationNotice}</p>
-              )}
-              {locationInfo && (
-                <p className="mt-2 whitespace-pre-line text-xs text-teal">{locationInfo}</p>
-              )}
-              <button
-                type="submit"
-                disabled={adding || !newTitle.trim()}
-                className="mt-3 w-full sm:w-auto rounded-lg bg-amber px-5 py-2.5 text-sm font-medium text-ink transition hover:opacity-90 disabled:opacity-50 cursor-pointer shadow-xs active:scale-95"
-              >
-                {adding ? "追加中…" : "この日に追加"}
-              </button>
-            </form>
-          </>
+          </div>
         )}
         </div>
       </section>
 
-      {/* タイムライン予定編集モーダル */}
+      {/* スマホ用 右下固定の大きなフローティング「＋」ボタン */}
+      {activeTab === "timeline" && (
+        <button
+          type="button"
+          onClick={() => setIsAddModalOpen(true)}
+          aria-label="予定を追加"
+          className="fixed right-5 bottom-20 md:hidden z-30 flex h-14 w-14 items-center justify-center rounded-full bg-amber text-ink shadow-lg transition-transform hover:scale-105 active:scale-95 cursor-pointer"
+        >
+          <svg
+            className="h-7 w-7"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2.5}
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+          </svg>
+        </button>
+      )}
+
+      {/* 予定追加モーダル / ボトムシート */}
+      <AddTimelineModal
+        isOpen={isAddModalOpen}
+        onClose={() => setIsAddModalOpen(false)}
+        dayNumber={activeDay}
+        dayNumbers={dayNumbers}
+        onAdd={handleAddModalItem}
+        adding={adding}
+        locationNotice={locationNotice}
+        locationInfo={locationInfo}
+      />
+
+      {/* 移動方法選択モーダル / ボトムシート（2枚目画像仕様） */}
+      {selectedTravelSegment && (
+        <TravelModeModal
+          isOpen={selectedTravelSegment !== null}
+          onClose={() => setSelectedTravelSegment(null)}
+          fromItem={selectedTravelSegment.fromItem}
+          toItem={selectedTravelSegment.toItem}
+          currentMode={selectedTravelSegment.currentMode}
+          stations={stations}
+          onSelectMode={async (mode) => {
+            await changeTravelMode(selectedTravelSegment.toItem, mode);
+          }}
+        />
+      )}
+
+      {/* タイムライン予定編集モーダル / ボトムシート */}
       <EditTimelineModal
         isOpen={editingItem !== null}
         item={editingItem}

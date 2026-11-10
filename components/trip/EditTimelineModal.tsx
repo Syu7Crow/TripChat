@@ -144,16 +144,19 @@ export default function EditTimelineModal({
       role="dialog"
       aria-modal="true"
       aria-labelledby="edit-modal-title"
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-ink/60 backdrop-blur-xs transition-opacity duration-200"
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-ink/60 backdrop-blur-xs transition-opacity duration-200"
     >
       {/* 背景タップで閉じる */}
       <div className="fixed inset-0" onClick={onClose} aria-hidden="true" />
 
-      {/* モーダル本体 */}
+      {/* ボトムシート / モーダル本体 */}
       <div
-        className="relative w-full max-w-lg rounded-2xl border border-paper-line bg-paper p-5 sm:p-6 shadow-2xl max-h-[90dvh] overflow-y-auto z-10"
+        className="relative w-full max-w-lg rounded-t-3xl sm:rounded-2xl border-t sm:border border-paper-line bg-paper p-5 sm:p-6 shadow-2xl max-h-[92dvh] overflow-y-auto z-10 animate-in slide-in-from-bottom duration-200"
         onClick={(e) => e.stopPropagation()}
       >
+        {/* スマホ用ドラッグハンドルバー */}
+        <div className="w-12 h-1.5 bg-ink/20 rounded-full mx-auto mb-3 sm:hidden" />
+
         <div className="flex items-center justify-between border-b border-paper-line pb-3">
           <h2 id="edit-modal-title" className="font-display text-lg font-bold text-ink">
             予定を編集
@@ -161,7 +164,7 @@ export default function EditTimelineModal({
           <button
             type="button"
             onClick={onClose}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-ink-text/50 hover:bg-paper-line/50 hover:text-ink cursor-pointer transition text-lg leading-none"
+            className="flex h-10 w-10 items-center justify-center rounded-xl text-ink-text/50 hover:bg-paper-line/50 hover:text-ink cursor-pointer transition text-2xl leading-none"
             aria-label="閉じる"
           >
             ×
@@ -279,14 +282,14 @@ export default function EditTimelineModal({
               type="button"
               onClick={onClose}
               disabled={saving}
-              className="rounded-lg px-4 py-2 text-sm font-medium text-ink-text/70 transition hover:bg-paper-line/50 cursor-pointer"
+              className="min-h-[44px] rounded-xl px-4 py-2.5 text-sm font-medium text-ink-text/70 transition hover:bg-paper-line/50 cursor-pointer"
             >
               キャンセル
             </button>
             <button
               type="submit"
               disabled={saving || !title.trim()}
-              className="rounded-lg bg-amber px-5 py-2 text-sm font-medium text-ink transition hover:opacity-90 disabled:opacity-50 cursor-pointer shadow-xs active:scale-95"
+              className="min-h-[44px] rounded-xl bg-amber px-6 py-2.5 text-sm font-bold text-ink transition hover:opacity-90 disabled:opacity-50 cursor-pointer shadow-xs active:scale-95"
             >
               {saving ? "保存中…" : "変更を保存"}
             </button>

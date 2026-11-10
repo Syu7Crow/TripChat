@@ -168,6 +168,30 @@ export function estimateTravel(straightKm: number, mode: TravelMode): TravelEsti
     };
   }
 
+  if (mode === "airplane") {
+    // 飛行機: 搭乗手続き・保安検査で約75分 + 飛行時間 (平均時速約650km)
+    const minutes = Math.round((straightKm / 650) * 60) + 75;
+    const fareYen = round10(7500 + straightKm * 12);
+    return {
+      minutes,
+      fareYen,
+      distanceKm: straightKm,
+      basis: "航空便・搭乗手続き含む概算目安",
+    };
+  }
+
+  if (mode === "ferry") {
+    // フェリー: 航路時速約35km + 乗降・待合約30分
+    const minutes = Math.round((straightKm / 35) * 60) + 30;
+    const fareYen = round10(1800 + straightKm * 25);
+    return {
+      minutes,
+      fareYen,
+      distanceKm: straightKm,
+      basis: "旅客フェリー航路の概算目安",
+    };
+  }
+
   // transit(電車・バス): 距離が伸びるほど快速・特急・新幹線の比率が増えるため、平均速度を連続的に上げる
   let minutes: number;
   if (km <= 15) {
