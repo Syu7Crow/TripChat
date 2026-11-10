@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { createClient } from "@/lib/supabase/client";
 import { geocodeAddress } from "@/lib/geocode";
@@ -36,6 +36,12 @@ export default function EditTimelineModal({
   const [locationNotice, setLocationNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // 下スワイプで閉じるドラッグジェスチャーの状態
+  const [translateY, setTranslateY] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStartY = useRef(0);
+  const currentTranslateY = useRef(0);
+
   useEffect(() => {
     setMounted(true);
   }, []);
@@ -52,6 +58,9 @@ export default function EditTimelineModal({
       setNote(item.note ?? "");
       setLocationNotice(null);
       setError(null);
+      setTranslateY(0);
+      currentTranslateY.current = 0;
+      setIsDragging(false);
     }
   }, [item, isOpen]);
 
@@ -75,6 +84,39 @@ export default function EditTimelineModal({
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isOpen, onClose]);
+
+  // スワイプダウン（ドラッグして閉じる）ハンドラー
+  function handleTouchStart(e: React.TouchEvent) {
+    dragStartY.current = e.touches[0].clientY;
+    setIsDragging(true);
+  }
+
+  function handleTouchMove(e: React.TouchEvent) {
+    if (!isDragging) return;
+    const deltaY = e.touches[0].clientY - dragStartY.current;
+    if (deltaY > 0) {
+      currentTranslateY.current = deltaY;
+      setTranslateY(deltaY);
+    } else {
+      currentTranslateY.current = deltaY * 0.15;
+      setTranslateY(deltaY * 0.15);
+    }
+  }
+
+  function handleTouchEnd() {
+    setIsDragging(false);
+    if (currentTranslateY.current > 80) {
+      setTranslateY(400);
+      setTimeout(() => {
+        onClose();
+        setTranslateY(0);
+        currentTranslateY.current = 0;
+      }, 180);
+    } else {
+      setTranslateY(0);
+      currentTranslateY.current = 0;
+    }
+  }
 
   if (!mounted || !isOpen || !item) return null;
 
@@ -151,13 +193,32 @@ export default function EditTimelineModal({
 
       {/* ボトムシート / モーダル本体 */}
       <div
-        className="relative w-full max-w-lg rounded-t-3xl sm:rounded-2xl border-t sm:border border-paper-line bg-paper p-5 sm:p-6 shadow-2xl max-h-[92dvh] overflow-y-auto z-10 animate-in slide-in-from-bottom duration-200"
+        className="relative w-full max-w-lg rounded-t-3xl sm:rounded-2xl border-t sm:border border-paper-line bg-paper px-5 pt-3 pb-[calc(env(safe-area-inset-bottom,0px)+20px)] sm:p-6 shadow-2xl max-h-[92dvh] overflow-y-auto z-10 will-change-transform"
+        style={{
+          transform: translateY !== 0 ? `translateY(${Math.max(0, translateY)}px)` : undefined,
+          transition: isDragging
+            ? "none"
+            : "transform 0.22s cubic-bezier(0.16, 1, 0.3, 1)",
+        }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* スマホ用ドラッグハンドルバー */}
-        <div className="w-12 h-1.5 bg-ink/20 rounded-full mx-auto mb-3 sm:hidden" />
+        {/* スマホ用ドラッグハンドル領域（スワイプダウンで閉じるタッチ領域） */}
+        <div
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+          className="w-full py-2.5 -mt-1 mb-1 flex items-center justify-center cursor-grab active:cursor-grabbing sm:hidden touch-none select-none"
+        >
+          <div className="w-12 h-1.5 bg-ink/30 rounded-full transition-transform active:scale-110" />
+        </div>
 
-        <div className="flex items-center justify-between border-b border-paper-line pb-3">
+        {/* ヘッダー部（ここもスワイプダウン操作に対応） */}
+        <div
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+          className="flex items-center justify-between border-b border-paper-line pb-3 select-none touch-none"
+        >
           <h2 id="edit-modal-title" className="font-display text-lg font-bold text-ink">
             予定を編集
           </h2>
