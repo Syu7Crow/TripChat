@@ -31,15 +31,34 @@ export class GeminiError extends Error {
 }
 
 /**
- * 環境変数 GEMINI_MODEL があれば最優先。なければ gemini-3.6-flash から順に試す。
- * (gemini-3.8-flash は、動作確認したAPIキーで応答が返らなかったため、2番目にしている)
+ * 環境変数 GEMINI_MODEL があれば最優先。なければ gemini-2.5-flash、gemini-3.5-flash-lite から順に試す。
  */
 export function candidateModels(envModel?: string | null): string[] {
-  const list = [envModel?.trim(), "gemini-3.6-flash", "gemini-3.8-flash", "gemini-2.5-flash"];
+  const list = [envModel?.trim(), "gemini-2.5-flash", "gemini-3.5-flash-lite"];
   return [...new Set(list.filter((m): m is string => !!m))];
 }
 
 const ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models";
+
+function getGenerationConfig(model: string, withThinking: boolean): Record<string, unknown> {
+  const config: Record<string, unknown> = {
+    responseMimeType: "application/json",
+    temperature: 0.7,
+    maxOutputTokens: 8192,
+  };
+
+  if (!withThinking) return config;
+
+  // モデルに応じた thinking 設定
+  if (model.includes("2.5")) {
+    // gemini-2.5系は thinkingLevel 非対応のため、thinkingBudget で制御 (0で思考遅延を防止)
+    config.thinkingConfig = { thinkingBudget: 0 };
+  } else if (/gemini-3\.|gemini-flash-latest/i.test(model)) {
+    // 3.x系は thinkingLevel をサポート
+    config.thinkingConfig = { thinkingLevel: "low" };
+  }
+  return config;
+}
 
 function isKeyError(status: number, body: string): boolean {
   return (
@@ -72,8 +91,8 @@ export async function generateJson(
     apiKey,
     models,
     fetchImpl = fetch,
-    timeoutMs = 12_000,
-    totalTimeoutMs = 28_000,
+    timeoutMs = 7_000,
+    totalTimeoutMs = 20_000,
     onLog = () => {},
   } = options;
 
@@ -86,6 +105,7 @@ export async function generateJson(
   for (const model of models) {
     // 残り時間が少なければ、これ以上は試さない
     if (deadline - Date.now() < 1_500) break;
+    let retried503 = false;
     // 思考の設定を受け付けないモデルのために、400で「thinking」に触れていたら設定なしでもう一度送る
     for (const withThinking of [true, false]) {
       const attemptMs = Math.min(timeoutMs, Math.max(1_000, deadline - Date.now()));
@@ -100,18 +120,13 @@ export async function generateJson(
           signal: controller.signal,
           body: JSON.stringify({
             contents: [{ role: "user", parts: [{ text: prompt }] }],
-            generationConfig: {
-              responseMimeType: "application/json",
-              temperature: 0.7,
-              maxOutputTokens: 8192,
-              ...(withThinking ? { thinkingConfig: { thinkingLevel: "low" } } : null),
-            },
+            generationConfig: getGenerationConfig(model, withThinking),
           }),
         });
       } catch (error) {
         clearTimeout(timer);
         if (error instanceof Error && error.name === "AbortError") {
-          // 応答が来なかったモデルは諦めて、次のモデルを試す
+          // 応答が来なかったモデルは諦めて、次のモデルを速やかに試す
           sawTimeout = true;
           onLog(`model=${model} ${Math.round((Date.now() - startedAt) / 1000)}秒待っても応答なし(時間切れ)`);
           break;
@@ -132,11 +147,37 @@ export async function generateJson(
         if (isKeyError(res.status, body)) {
           throw new GeminiError("BAD_KEY", "GEMINI_API_KEY が正しくありません。", res.status);
         }
-        if (withThinking && res.status === 400 && /thinking/i.test(body)) {
-          continue; // 同じモデルを、思考の設定なしで再試行
+        // 400: thinking関連エラーなら思考設定なしで再試行。その他の設定ミス等は再試行せず次へ
+        if (res.status === 400) {
+          if (withThinking && /thinking/i.test(body)) {
+            continue; // 同じモデルを、思考の設定なしで再試行
+          }
+          sawUnavailable = true;
+          break; // 次のモデルへ
         }
-        if (res.status === 429) sawRateLimit = true;
-        else if ([400, 403, 404].includes(res.status)) sawUnavailable = true;
+        // 404: モデル廃止または利用不可
+        if (res.status === 404) {
+          sawUnavailable = true;
+          break;
+        }
+        // 429: レートリミット（必要以上に再試行せず次のモデルへ）
+        if (res.status === 429) {
+          sawRateLimit = true;
+          break;
+        }
+        // 503: 一時的な高負荷。時間に余裕があれば短時間待機して1度再試行
+        if (res.status === 503) {
+          sawUnavailable = true;
+          const remaining = deadline - Date.now();
+          if (remaining > 4_000 && !retried503) {
+            retried503 = true;
+            onLog(`model=${model} 503高負荷のため800ms待機して再試行`);
+            await new Promise((r) => setTimeout(r, 800));
+            continue;
+          }
+          break; // 次のモデルへ
+        }
+        if ([401, 403].includes(res.status)) sawUnavailable = true;
         break; // 次のモデルへ
       }
 
