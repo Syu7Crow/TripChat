@@ -137,17 +137,26 @@ if (available.length) {
 // ---- 3. 実際に質問して、速さを測る
 line();
 line("【3】実際に短い質問をして、返答までの時間を測る");
-const candidates = [...new Set([preferred, "gemini-3.8-flash", "gemini-3.6-flash", "gemini-2.5-flash"].filter(Boolean))];
+const candidates = [...new Set([preferred, "gemini-2.5-flash", "gemini-3.5-flash-lite"].filter(Boolean))];
 let working = null;
 
 for (const model of candidates) {
   const note = available.length && !available.includes(model) ? "(一覧には無いモデル)" : "";
+  const generationConfig = {
+    maxOutputTokens: 1024,
+    ...(model.includes("2.5")
+      ? { thinkingConfig: { thinkingBudget: 0 } }
+      : /gemini-3\.|gemini-flash-latest/i.test(model)
+      ? { thinkingConfig: { thinkingLevel: "low" } }
+      : {}),
+  };
+
   const result = await call(`/models/${encodeURIComponent(model)}:generateContent`, {
     method: "POST",
-    timeoutMs: 20000,
+    timeoutMs: 8000,
     body: {
       contents: [{ role: "user", parts: [{ text: "「OK」とだけ返してください。" }] }],
-      generationConfig: { maxOutputTokens: 1024, thinkingConfig: { thinkingLevel: "low" } },
+      generationConfig,
     },
   });
 
@@ -162,13 +171,13 @@ for (const model of candidates) {
     } catch {
       // 読めなくても、時間は分かる
     }
-    line(`  ✓ ${model}${note}: ${seconds(result.ms)} → 「${snippet(answer, 40)}」`);
+    line(`  ✓ ${model}${note}: ${seconds(result.ms)} (HTTP ${result.status}) → 「${snippet(answer, 40)}」`);
     working ??= { model, ms: result.ms };
   } else if (result.status === 0) {
-    line(`  ✗ ${model}${note}: ${result.timedOut ? "20秒待っても応答なし" : result.code}`);
+    line(`  ✗ ${model}${note}: ${result.timedOut ? "8秒待っても応答なし(タイムアウト)" : result.code} (${seconds(result.ms)})`);
   } else {
-    line(`  ✗ ${model}${note}: status ${result.status}(${seconds(result.ms)})`);
-    line(`      ${snippet(result.text)}`);
+    line(`  ✗ ${model}${note}: HTTP ${result.status} (${seconds(result.ms)})`);
+    line(`      エラー内容: ${snippet(result.text)}`);
   }
 }
 
